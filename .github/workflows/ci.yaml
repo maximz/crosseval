@@ -186,7 +186,7 @@ jobs:
 
       - name: Publish the release notes and tag new version, or drafts release notes as PRs merge into master
         # This step succeeds even when release-drafter internally fails with an HttpError.
-        uses: release-drafter/release-drafter@v5
+        uses: release-drafter/release-drafter@v6
         id: release_drafter
         with:
           config-name: release-drafter-config.yml

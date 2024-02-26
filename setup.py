@@ -10,7 +10,20 @@ with open("README.md") as readme_file:
 with open("CHANGELOG.md") as history_file:
     history = history_file.read()
 
-requirements = ["Click>=7.0"]
+requirements = [
+    "Click>=7.0",
+    "kdict",
+    "scikit-learn",
+    "multiclass-metrics",
+    "genetools[scanpy]",
+    "frozendict",
+    "joblib",
+    "numpy",
+    "sentinels",
+    "enum-mixins",
+    "pandas",
+    "typer[all]",
+]
 
 setup_requirements = [
     "pytest-runner",
@@ -38,6 +51,14 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
     install_requires=requirements,
+    entry_points={
+        # Register CLI commands:
+        # https://typer.tiangolo.com/tutorial/package/
+        # https://click.palletsprojects.com/en/8.1.x/setuptools/#setuptools-integration
+        "console_scripts": [
+            "plotconfusion = crosseval.scripts.plot_confusion_matrix:app",
+        ],
+    },
     license="MIT license",
     long_description=readme + "\n\n" + history,
     long_description_content_type="text/markdown",

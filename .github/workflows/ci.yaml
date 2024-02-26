@@ -73,6 +73,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel
           pip install -r requirements_dev.txt
+          pip install -e .
           pip install -U codecov
       - name: Lint
         run: |
@@ -94,6 +95,8 @@ jobs:
         # v3.1.5 is a specific version for node20. v3.1.6 returned to node16.
         uses: codecov/codecov-action@v3.1.5
         if: ${{ success() }}
+      - name: Confirm that cli command is installed
+        run: plotconfusion --help
 
   docs:
     # can we avoid rebuilding netlify cli docker image every time? https://github.com/netlify/actions/issues/19

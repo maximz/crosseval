@@ -20,7 +20,7 @@ from .model_single_fold_performance import ModelSingleFoldPerformance
 from .model_global_performance import ModelGlobalPerformance, Y_TRUE_VALUES
 
 from .experiment_set_global_performance import ExperimentSetGlobalPerformance
-from .experiment_set import ExperimentSet
+from .experiment_set import ExperimentSet, RemoveIncompleteStrategy
 
 __all__ = [
     "DEFAULT_LABEL_SCORERS",
@@ -36,12 +36,13 @@ __all__ = [
     "ModelSingleFoldPerformance",
     "ExperimentSetGlobalPerformance",
     "ExperimentSet",
+    "RemoveIncompleteStrategy",
 ]
 
 
 __author__ = """Maxim Zaslavsky"""
 __email__ = "maxim@maximz.com"
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 # Set default logging handler to avoid "No handler found" warnings.
 logging.getLogger(__name__).addHandler(NullHandler())

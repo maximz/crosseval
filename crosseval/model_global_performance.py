@@ -215,6 +215,11 @@ class ModelGlobalPerformance:
 
         # This dataframe has index = fold_id, columns = metric keyname, values = Metric object
         scores_per_fold = pd.DataFrame.from_dict(raw_metrics_per_fold, orient="index")
+
+        # Early return if no metrics were produced
+        if scores_per_fold.empty:
+            return {}
+
         # extract metric friendlynames (TODO(later): move away from separation of metric-keyname and metric-friendly-name. use friendly name only?)
         map_metric_keyname_to_friendly_name = {}
         for colname in scores_per_fold.columns:

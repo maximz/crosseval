@@ -2,7 +2,7 @@ bump2version>=1.0.1
 Click>=7.0
 coverage>=7.2.2
 enum-mixins == 0.0.1
-frozendict==2.4.0
+frozendict==2.4.4
 furo==2024.1.29
 genetools == 0.7.1
 joblib == 1.3.2

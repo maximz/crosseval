@@ -236,15 +236,15 @@ class ModelGlobalPerformance:
                 )
             map_metric_keyname_to_friendly_name[colname] = friendly_names[0]
         # now change df to have values = metric value rather than full Metric object (again, note that a metric might not appear in all folds)
-        scores_per_fold = scores_per_fold.applymap(
+        scores_per_fold = scores_per_fold.map(
             lambda metric: metric.value if isinstance(metric, Metric) else np.nan
         )
 
         # aggregate mean, standard deviation, and non-NaN count (columns) for each metric keyname (index)
         scores_per_fold_agg = scores_per_fold.describe().loc[["mean", "std", "count"]].T
-        scores_per_fold_agg["std"].fillna(
-            0, inplace=True
-        )  # if a metric appeared in only one fold, it will have std NaN
+        # if a metric appeared in only one fold, it will have std NaN, so fillna
+        scores_per_fold_agg["std"] = scores_per_fold_agg["std"].fillna(0)
+
         # Add metric friendlyname. (unlike replace()'s pass-through behavior, map() means that if not in the dict, will store NaN)
         scores_per_fold_agg[
             "metric_friendly_name"

@@ -124,7 +124,7 @@ jobs:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_DEV_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.DEV_NETLIFY_SITE_ID }}
         with:
-          args: deploy --dir="docs/_build/html"
+          args: deploy --dir="docs/_build/html" --no-build
         timeout-minutes: 5
 
 
@@ -171,7 +171,7 @@ jobs:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_PROD_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.PROD_NETLIFY_SITE_ID }}
         with:
-          args: deploy --dir="docs/_build/html" --prod
+          args: deploy --dir="docs/_build/html" --prod --no-build
         timeout-minutes: 5
 
       - name: Publish package

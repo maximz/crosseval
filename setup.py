@@ -40,7 +40,7 @@ setup(
     description="crosseval",
     packages=find_packages(include=["crosseval", "crosseval.*"]),
     python_requires=">=3.8",
-    version="0.0.4",
+    version="0.0.5",
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
         "Intended Audience :: Developers",

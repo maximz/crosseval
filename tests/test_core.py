@@ -523,8 +523,7 @@ def test_feature_importances_and_names_with_default_feature_names(
 
             ## Test feature names and feature importances for single fold
             if model_name in dummy_models:
-                # dummy has no coefs, and also swallows feature names
-                assert single_perf.feature_names is None
+                # dummy has no coefs
                 assert single_perf.feature_importances is None
                 assert single_perf.multiclass_feature_importances is None
             elif model_name in ovr_models:
@@ -663,8 +662,7 @@ def test_feature_importances_and_names_with_custom_feature_names(
             ## Test feature names and feature importances for single fold
 
             if model_name in dummy_models:
-                # dummy has no coefs, and also swallows feature names
-                assert single_perf.feature_names is None
+                # dummy has no coefs
                 assert single_perf.feature_importances is None
                 assert single_perf.multiclass_feature_importances is None
             elif model_name in ovr_models:

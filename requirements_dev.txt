@@ -4,7 +4,7 @@ coverage>=7.2.2
 enum-mixins == 0.0.1
 frozendict==2.4.0
 furo==2024.1.29
-genetools >= 0.7.6
+genetools >= 0.7.5
 joblib == 1.3.2
 kdict == 0.1.0
 matplotlib == 3.9.4

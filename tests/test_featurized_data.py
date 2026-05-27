@@ -14,7 +14,7 @@ def test_featurized_data_apply_abstention_mask():
         sample_weights=np.array([0.1, 0.2, 0.3]),
         extras={"key": "value"},
     )
-    fd.X.values[2, :] = 0
+    fd.X.iloc[2, :] = 0
     fd_new = fd.apply_abstention_mask(mask=(np.array(fd.X) == 0).all(axis=1))
     assert fd_new.X.shape == (2, 5)
     assert (np.array(fd_new.X) == 1).all()

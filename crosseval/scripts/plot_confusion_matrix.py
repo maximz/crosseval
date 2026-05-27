@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import seaborn as sns
 import typer
-
-from crosseval.plotting import plot_confusion_matrix, savefig, wrap_tick_labels
+from genetools.plots import plot_confusion_matrix, savefig, wrap_tick_labels
 
 app = typer.Typer()
 

@@ -77,10 +77,9 @@ crosseval works with fitted sklearn-style classifiers that expose `predict()` an
 ## Development
 
 ```bash
-pip install -r requirements_dev.txt
-pip install -e .
-pre-commit install
+uv sync
+uv run pre-commit install
 
-make test
-make lint
+uv run pytest
+uv run pre-commit run --all-files --show-diff-on-failure
 ```

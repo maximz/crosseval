@@ -865,7 +865,7 @@ class ModelGlobalPerformance:
         confusion_matrix_pred_label="Predicted label",
     ) -> pd.DataFrame:
         """Confusion matrix"""
-        from crosseval.plotting import make_confusion_matrix
+        from genetools.stats import make_confusion_matrix
 
         return make_confusion_matrix(
             y_true=self.cv_y_true_with_abstention,
@@ -883,8 +883,7 @@ class ModelGlobalPerformance:
     ) -> "matplotlib.figure.Figure":
         """Confusion matrix figure"""
         import matplotlib.pyplot as plt
-
-        from crosseval.plotting import plot_confusion_matrix
+        from genetools.plots import plot_confusion_matrix
 
         fig, ax = plot_confusion_matrix(
             self.confusion_matrix(
@@ -927,7 +926,7 @@ class ModelGlobalPerformance:
         )
 
         # Save confusion matrix figure
-        from crosseval.plotting import savefig
+        from genetools.plots import savefig
 
         savefig(
             self.confusion_matrix_fig(

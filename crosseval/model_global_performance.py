@@ -196,8 +196,16 @@ class ModelGlobalPerformance:
         exclude_metrics_that_dont_factor_in_abstentions=False,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ) -> Dict[str, str]:
-        """return dict mapping friendly-metric-name to "mean +/- std" formatted string (computed across folds)"""
+        """return dict mapping friendly-metric-name to per-fold aggregate.
+
+        When ``formatted`` is True (default), values are ``"mean +/- std (in N folds)"``
+        strings for human display. When False, values are the raw mean across folds as
+        a float — useful for programmatic downstream use where the caller wants to do
+        its own formatting or comparison. NaN-folds are dropped from the mean (matching
+        the formatted variant's count semantics).
+        """
         raw_metrics_per_fold: Dict[int, Dict[str, Metric]] = {
             fold_id: fold_output.scores(
                 with_abstention=with_abstention,
@@ -255,6 +263,13 @@ class ModelGlobalPerformance:
             raise ValueError("Scores_per_fold_agg had NaNs")
         if scores_per_fold_agg["metric_friendly_name"].duplicated().any():
             raise ValueError("Some metrics had duplicate friendly names")
+
+        if not formatted:
+            # Raw float means for programmatic consumers.
+            return {
+                row["metric_friendly_name"]: float(row["mean"])
+                for _, row in scores_per_fold_agg.iterrows()
+            }
 
         # summarize a range of scores into strings: mean plus-minus one standard deviation (68% interval if normally distributed).
         return {
@@ -625,17 +640,20 @@ class ModelGlobalPerformance:
         self,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ):
         scores = {
             "per_fold": self.aggregated_per_fold_scores(
                 with_abstention=False,
                 label_scorers=label_scorers,
                 probability_scorers=probability_scorers,
+                formatted=formatted,
             ),
             "global": self.global_scores(
                 with_abstention=False,
                 label_scorers=label_scorers,
                 probability_scorers=probability_scorers,
+                formatted=formatted,
             ),
         }
         if self.has_abstentions:
@@ -644,11 +662,13 @@ class ModelGlobalPerformance:
                 exclude_metrics_that_dont_factor_in_abstentions=True,
                 label_scorers=label_scorers,
                 probability_scorers=probability_scorers,
+                formatted=formatted,
             )
             scores["global_with_abstention"] = self.global_scores(
                 with_abstention=True,
                 label_scorers=label_scorers,
                 probability_scorers=probability_scorers,
+                formatted=formatted,
             )
         return scores
 
@@ -715,8 +735,15 @@ class ModelGlobalPerformance:
         with_abstention=True,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ) -> dict:
-        """Calculate global scores with or without abstention. Global scores should not include probabilistic scores."""
+        """Calculate global scores with or without abstention. Global scores should not include probabilistic scores.
+
+        When ``formatted`` is True (default), metric values are 3-decimal strings.
+        When False, metric values are raw floats. Non-metric string entries
+        (``"Abstention label"``, ``"Global evaluation column name"``) pass through
+        unchanged in both modes.
+        """
         scores = compute_classification_scores(
             y_true=self.cv_y_true_with_abstention
             if with_abstention
@@ -732,40 +759,50 @@ class ModelGlobalPerformance:
             label_scorers=label_scorers,
             probability_scorers=probability_scorers,
         )
-        # Format
-        scores_formatted = [
-            (metric.friendly_name, f"{metric.value:0.3f}")
-            for metric_keyname, metric in scores.items()
-        ]
+        if formatted:
+            scores_out = [
+                (metric.friendly_name, f"{metric.value:0.3f}")
+                for metric_keyname, metric in scores.items()
+            ]
+        else:
+            scores_out = [
+                (metric.friendly_name, float(metric.value))
+                for metric_keyname, metric in scores.items()
+            ]
         # confirm all metric friendly names are unique
-        all_metric_friendly_names = [v[0] for v in scores_formatted]
+        all_metric_friendly_names = [v[0] for v in scores_out]
         if len(set(all_metric_friendly_names)) != len(all_metric_friendly_names):
             raise ValueError("Metric friendly names are not unique")
 
         # then convert to dict
-        scores_formatted = dict(scores_formatted)
+        scores_out = dict(scores_out)
 
         if with_abstention:
-            scores_formatted[
-                "Unknown/abstention proportion"
-            ] = f"{self.abstention_proportion:0.3f}"
-            scores_formatted["Abstention label"] = self.abstain_label
+            scores_out["Unknown/abstention proportion"] = (
+                f"{self.abstention_proportion:0.3f}"
+                if formatted
+                else float(self.abstention_proportion)
+            )
+            scores_out["Abstention label"] = self.abstain_label
 
         if self.global_evaluation_column_name is not None:
-            scores_formatted[
+            scores_out[
                 "Global evaluation column name"
             ] = self.global_evaluation_column_name
 
-        return scores_formatted
+        return scores_out
 
     def _get_stats(
         self,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ):
         """Get overall stats for table"""
         scores = self._full_report_scores(
-            label_scorers=label_scorers, probability_scorers=probability_scorers
+            label_scorers=label_scorers,
+            probability_scorers=probability_scorers,
+            formatted=formatted,
         )
 
         # Combine all scores into single dictionary.

@@ -3,10 +3,18 @@ import logging
 from dataclasses import dataclass
 from functools import cache, cached_property
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Tuple, Union, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Tuple,
+    Union,
+    Optional,
+)
 
-import genetools
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import sentinels
@@ -15,15 +23,14 @@ from sklearn.metrics import (
 )
 
 
-from genetools.plots import plot_confusion_matrix
-from genetools.stats import make_confusion_matrix
-
-
 import multiclass_metrics
 
 from crosseval import ModelSingleFoldPerformance, Metric, Classifier
 from crosseval.utils import support_list_and_dict_arguments_in_cache_decorator
 from crosseval.scores import compute_classification_scores
+
+if TYPE_CHECKING:
+    import matplotlib.figure
 
 
 logger = logging.getLogger(__name__)
@@ -259,8 +266,8 @@ class ModelGlobalPerformance:
         ] = scores_per_fold_agg.index.to_series().map(
             map_metric_keyname_to_friendly_name
         )
-        if scores_per_fold_agg.isna().any().any():
-            raise ValueError("Scores_per_fold_agg had NaNs")
+        if scores_per_fold_agg["metric_friendly_name"].isna().any():
+            raise ValueError("Scores_per_fold_agg had metrics without friendly names")
         if scores_per_fold_agg["metric_friendly_name"].duplicated().any():
             raise ValueError("Some metrics had duplicate friendly names")
 
@@ -275,7 +282,7 @@ class ModelGlobalPerformance:
         return {
             row[
                 "metric_friendly_name"
-            ]: f"""{row['mean']:0.3f} +/- {row['std']:0.3f} (in {row['count']:n} folds)"""
+            ]: f"""{row["mean"]:0.3f} +/- {row["std"]:0.3f} (in {row["count"]:n} folds)"""
             for _, row in scores_per_fold_agg.iterrows()
         }
 
@@ -819,8 +826,8 @@ class ModelGlobalPerformance:
                 scores_dict[f"{k} {suffix}"] = v
 
         # Other summary stats.
-        nunique_predicted_labels = np.unique(self.cv_y_pred_without_abstention).shape[0]
-        nunique_true_labels = np.unique(self.cv_y_true_without_abstention).shape[0]
+        predicted_labels = set(np.unique(self.cv_y_pred_without_abstention))
+        true_labels = set(np.unique(self.cv_y_true_without_abstention))
 
         scores_dict.update(
             {
@@ -828,8 +835,8 @@ class ModelGlobalPerformance:
                 "n_abstentions": self.n_abstentions,
                 "sample_size including abstentions": self.sample_size_with_abstentions,
                 "abstention_rate": self.abstention_proportion,
-                # Flag if number of unique predicted labels is less than number of unique ground truth labels
-                "missing_classes": nunique_predicted_labels < nunique_true_labels,
+                # Flag if any ground-truth class is absent from predictions.
+                "missing_classes": not true_labels.issubset(predicted_labels),
             }
         )
         return scores_dict
@@ -858,6 +865,8 @@ class ModelGlobalPerformance:
         confusion_matrix_pred_label="Predicted label",
     ) -> pd.DataFrame:
         """Confusion matrix"""
+        from crosseval.plotting import make_confusion_matrix
+
         return make_confusion_matrix(
             y_true=self.cv_y_true_with_abstention,
             y_pred=self.cv_y_pred_with_abstention,
@@ -871,8 +880,12 @@ class ModelGlobalPerformance:
         confusion_matrix_figsize: Optional[Tuple[float, float]] = None,
         confusion_matrix_true_label="Patient of origin",
         confusion_matrix_pred_label="Predicted label",
-    ) -> plt.Figure:
+    ) -> "matplotlib.figure.Figure":
         """Confusion matrix figure"""
+        import matplotlib.pyplot as plt
+
+        from crosseval.plotting import plot_confusion_matrix
+
         fig, ax = plot_confusion_matrix(
             self.confusion_matrix(
                 confusion_matrix_true_label=confusion_matrix_true_label,
@@ -914,7 +927,9 @@ class ModelGlobalPerformance:
         )
 
         # Save confusion matrix figure
-        genetools.plots.savefig(
+        from crosseval.plotting import savefig
+
+        savefig(
             self.confusion_matrix_fig(
                 confusion_matrix_figsize=confusion_matrix_figsize,
                 confusion_matrix_true_label=confusion_matrix_true_label,

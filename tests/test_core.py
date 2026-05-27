@@ -530,7 +530,9 @@ def test_feature_importances_and_names_with_default_feature_names(
                 # multiclass OvR linear model is special cased
                 assert np.array_equal(single_perf.feature_names, [0, 1, 2, 3, 4])
                 assert single_perf.feature_importances is None
-                assert type(single_perf.multiclass_feature_importances) == pd.DataFrame
+                assert isinstance(
+                    single_perf.multiclass_feature_importances, pd.DataFrame
+                )
                 assert np.array_equal(
                     single_perf.multiclass_feature_importances.index, clf.classes_
                 )
@@ -547,7 +549,7 @@ def test_feature_importances_and_names_with_default_feature_names(
             elif model_name in tree_models:
                 # These work just like binary linear models
                 assert np.array_equal(single_perf.feature_names, [0, 1, 2, 3, 4])
-                assert type(single_perf.feature_importances) == pd.Series
+                assert isinstance(single_perf.feature_importances, pd.Series)
                 assert np.array_equal(
                     single_perf.feature_importances.index, single_perf.feature_names
                 )
@@ -672,7 +674,9 @@ def test_feature_importances_and_names_with_custom_feature_names(
                     ["feature_0", "feature_1", "feature_2", "feature_3", "feature_4"],
                 )
                 assert single_perf.feature_importances is None
-                assert type(single_perf.multiclass_feature_importances) == pd.DataFrame
+                assert isinstance(
+                    single_perf.multiclass_feature_importances, pd.DataFrame
+                )
                 assert np.array_equal(
                     single_perf.multiclass_feature_importances.index, clf.classes_
                 )
@@ -695,7 +699,7 @@ def test_feature_importances_and_names_with_custom_feature_names(
                     single_perf.feature_names,
                     ["feature_0", "feature_1", "feature_2", "feature_3", "feature_4"],
                 )
-                assert type(single_perf.feature_importances) == pd.Series
+                assert isinstance(single_perf.feature_importances, pd.Series)
                 assert np.array_equal(
                     single_perf.feature_importances.index, single_perf.feature_names
                 )

@@ -16,7 +16,7 @@ Classifier = Union[Pipeline, BaseEstimator]
 
 def is_clf_a_sklearn_pipeline(clf: Classifier) -> bool:
     # clf may be an individual estimator, or it may be a pipeline, in which case the estimator is the final pipeline step
-    return type(clf) == Pipeline
+    return isinstance(clf, Pipeline)
 
 
 def _get_final_estimator_if_pipeline(clf: Classifier) -> BaseEstimator:

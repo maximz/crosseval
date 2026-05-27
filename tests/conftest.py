@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.svm import SVC
 
 if os.getenv("_PYTEST_RAISE", "0") != "0":
@@ -40,8 +41,8 @@ if os.getenv("_PYTEST_RAISE", "0") != "0":
 def models_factory():
     return {
         "dummy": DummyClassifier(strategy="stratified"),
-        "logistic_multinomial": LogisticRegression(multi_class="multinomial"),
-        "logistic_ovr": LogisticRegression(multi_class="ovr"),
+        "logistic_multinomial": LogisticRegression(max_iter=1000),
+        "logistic_ovr": OneVsRestClassifier(LogisticRegression(max_iter=1000)),
         "randomforest": RandomForestClassifier(),
         "linearsvm": SVC(kernel="linear"),
         "nonlinear_svm": SVC(kernel="rbf"),

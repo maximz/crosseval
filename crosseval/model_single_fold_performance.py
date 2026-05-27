@@ -10,6 +10,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator
+from sklearn.multiclass import OneVsRestClassifier
 
 
 from crosseval import Classifier, Metric
@@ -89,6 +90,18 @@ def _extract_multiclass_feature_importances(clf: Classifier) -> Optional[np.ndar
     """get feature importances or coefficients from a multiclass OvR/OvO classifier."""
     # If this is a pipeline, use the final estimator
     final_estimator: BaseEstimator = _get_final_estimator_if_pipeline(clf)
+
+    if isinstance(final_estimator, OneVsRestClassifier) and hasattr(
+        final_estimator, "estimators_"
+    ):
+        coefs = [
+            np.ravel(estimator.coef_)
+            for estimator in final_estimator.estimators_
+            if hasattr(estimator, "coef_")
+        ]
+        if len(coefs) == len(final_estimator.classes_):
+            return np.vstack(coefs)
+        return None
 
     if hasattr(final_estimator, "coef_") and final_estimator.coef_.shape[0] > 1:
         # coef_ is ndarray of shape (1, n_features) if binary,

@@ -15,7 +15,12 @@ from sklearn.multiclass import OneVsRestClassifier
 
 from crosseval import Classifier, Metric
 from crosseval.scores import compute_classification_scores
-from crosseval.utils import _get_final_estimator_if_pipeline, is_clf_a_sklearn_pipeline
+from crosseval.utils import (
+    _get_final_estimator_if_pipeline,
+    index_rows_by_mask,
+    is_clf_a_sklearn_pipeline,
+    validate_boolean_mask,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -376,48 +381,47 @@ class ModelSingleFoldPerformance:
     def apply_abstention_mask(self, mask: np.ndarray) -> Self:
         """Pass a boolean mask. Returns a copy of self with the mask samples turned into abstentions."""
         # TODO: consider exposing this functionality on an ExperimentSetSummary, and on a ModelGlobalPerformance -> basically regenerates by modifying inner ModelSingleFoldPerformances?
-        if mask.shape[0] != self.y_true.shape[0]:
-            raise ValueError(
-                f"Must supply boolean mask, but got mask.shape[0] ({mask.shape[0]}) != self.y_true.shape[0] ({self.y_true.shape[0]})"
-            )
+        mask = validate_boolean_mask(
+            mask, expected_length=self.y_true.shape[0], value_name="mask"
+        )
         return dataclasses.replace(
             self,
             # Pass in null InitVars to make a copy (see comments in `.copy()` method above)
             clf=None,
             X_test=None,
             # Make changes
-            y_true=self.y_true[~mask],
-            y_pred=self.y_pred[~mask],
             X_test_shape=(
                 self.X_test_shape[0] - np.sum(mask),
                 self.X_test_shape[1],
             )
             if self.X_test_shape is not None
             else None,
-            y_decision_function=self.y_decision_function[~mask]
+            y_true=index_rows_by_mask(self.y_true, ~mask),
+            y_pred=index_rows_by_mask(self.y_pred, ~mask),
+            y_decision_function=index_rows_by_mask(self.y_decision_function, ~mask)
             if self.y_decision_function is not None
             else None,
-            y_preds_proba=self.y_preds_proba[~mask]
+            y_preds_proba=index_rows_by_mask(self.y_preds_proba, ~mask)
             if self.y_preds_proba is not None
             else None,
             # special case if self.test_metadata is empty and thus cannot be masked further
-            test_metadata=self.test_metadata[~mask]
+            test_metadata=index_rows_by_mask(self.test_metadata, ~mask)
             if not self.test_metadata.empty
             else self.test_metadata,
-            test_sample_weights=self.test_sample_weights[~mask]
+            test_sample_weights=index_rows_by_mask(self.test_sample_weights, ~mask)
             if self.test_sample_weights is not None
             else None,
             test_abstentions=np.hstack(
                 [
                     self.test_abstentions,
-                    self.y_true[mask],
+                    index_rows_by_mask(self.y_true, mask),
                 ]
             ),
             test_abstention_metadata=pd.concat(
                 [
                     self.test_abstention_metadata,
                     # special case if self.test_metadata is empty and thus cannot be masked further
-                    self.test_metadata[mask]
+                    index_rows_by_mask(self.test_metadata, mask)
                     if not self.test_metadata.empty
                     else self.test_metadata,
                 ],
@@ -428,7 +432,7 @@ class ModelSingleFoldPerformance:
                     self.test_abstention_sample_weights
                     if self.test_abstention_sample_weights is not None
                     else [],
-                    self.test_sample_weights[mask],
+                    index_rows_by_mask(self.test_sample_weights, mask),
                 ]
             )
             if self.test_sample_weights is not None

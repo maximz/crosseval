@@ -24,7 +24,7 @@ dependencies = [
     "Click>=7.0",
     "enum-mixins",
     "frozendict",
-    "genetools>=0.7.6",
+    "genetools>=0.7.5",
     "joblib",
     "kdict",
     "matplotlib",
@@ -66,6 +66,3 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["crosseval", "crosseval.*"]
-
-[tool.uv.sources]
-genetools = { path = "../genetools", editable = true }

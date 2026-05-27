@@ -1036,7 +1036,7 @@ requires-dist = [
     { name = "click", specifier = ">=7.0" },
     { name = "enum-mixins" },
     { name = "frozendict" },
-    { name = "genetools", editable = "../genetools" },
+    { name = "genetools", specifier = ">=0.7.5" },
     { name = "joblib" },
     { name = "kdict" },
     { name = "matplotlib" },
@@ -1465,8 +1465,8 @@ wheels = [
 
 [[package]]
 name = "genetools"
-version = "0.7.6"
-source = { editable = "../genetools" }
+version = "0.7.5"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "joblib", version = "1.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "joblib", version = "1.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
@@ -1490,19 +1490,10 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "seaborn" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "joblib" },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "scanpy", marker = "extra == 'scanpy'" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "seaborn" },
+sdist = { url = "https://files.pythonhosted.org/packages/75/33/a13a69adc54cf5a7757d06665d014e4b6955feec92f45bbeff6f2a739dcf/genetools-0.7.5.tar.gz", hash = "sha256:abe71d77ca936bcfc3f513502f93a1cc3b2b091f316c11da46face2da3799b4f", size = 1845063, upload-time = "2024-10-23T18:33:18.023Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/1c/592d53e6b3dacd6cf93389e4a78be1ae2d24b01b4e97692974abbcd7e989/genetools-0.7.5-py2.py3-none-any.whl", hash = "sha256:c25ecdd26d47ed76372051317c242e36294177db492272c29fcb3add4285d0b7", size = 45534, upload-time = "2024-10-23T18:33:16.103Z" },
 ]
-provides-extras = ["scanpy"]
 
 [[package]]
 name = "identify"

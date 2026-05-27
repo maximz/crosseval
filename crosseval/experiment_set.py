@@ -31,10 +31,11 @@ class RemoveIncompleteStrategy(ValidatableEnumMixin, Enum):
     These represent two strategies for removing incomplete results to compare models apples-to-apples on the same data (i.e. same collection of cross validation folds):
 
     1. Keep only those models that have results for all folds (DROP_INCOMPLETE_MODELS; sensible default).
-    (How this works: Find the maximum number of folds any model has results for; keep only models analyzed for that number of folds.)
+    (How this works: keep only models whose fold IDs exactly match the union of fold IDs seen across the experiment.)
     This is relevant when you have some finnicky models that may give up on a fold out of the blue.
 
     2. Keep only folds that have results for all models (DROP_INCOMPLETE_FOLDS).
+    (How this works: keep only folds whose model names exactly match the full model set.)
     This is relevant when you have a finnicky fold that fails for some but not all models.
     For example, if one cross validation fold's training set somehow only has samples of a single class (perhaps the splits were stratified for one target variable, and now you are evaluating how well you can model another classification target without changing the cross validation structure),
     many models will fail and cite that there was only a single class in the data — but some models might still succeed.
@@ -118,15 +119,17 @@ class ExperimentSet:
             # edge case: empty
             return []
 
-        n_folds_per_model = {
-            model_name: len(self.model_outputs[model_name, :])
-            for model_name in self.model_outputs.keys(dimensions=0)
+        fold_ids_by_model = {
+            model_name: set() for model_name in self.model_outputs.keys(dimensions=0)
         }
-        max_n_folds_per_model = max(n_folds_per_model.values())
+        for model_name, fold_id in self.model_outputs.keys():
+            fold_ids_by_model[model_name].add(fold_id)
+
+        required_fold_ids = set().union(*fold_ids_by_model.values())
         return [
             model_name
-            for model_name, n_folds in n_folds_per_model.items()
-            if n_folds != max_n_folds_per_model
+            for model_name, fold_ids in fold_ids_by_model.items()
+            if fold_ids != required_fold_ids
         ]
 
     @property
@@ -134,15 +137,18 @@ class ExperimentSet:
         if len(self.model_outputs) == 0:
             # edge case: empty
             return []
-        n_models_per_fold = {
-            fold_id: len(self.model_outputs[:, fold_id])
-            for fold_id in self.model_outputs.keys(dimensions=1)
+
+        model_names_by_fold = {
+            fold_id: set() for fold_id in self.model_outputs.keys(dimensions=1)
         }
-        max_n_models_per_fold = max(n_models_per_fold.values())
+        for model_name, fold_id in self.model_outputs.keys():
+            model_names_by_fold[fold_id].add(model_name)
+
+        required_model_names = set(self.model_outputs.keys(dimensions=0))
         return [
             fold_id
-            for fold_id, n_models in n_models_per_fold.items()
-            if n_models != max_n_models_per_fold
+            for fold_id, model_names in model_names_by_fold.items()
+            if model_names != required_model_names
         ]
 
     def remove_incomplete(

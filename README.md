@@ -83,3 +83,10 @@ uv run pre-commit install
 uv run pytest
 uv run pre-commit run --all-files --show-diff-on-failure
 ```
+
+When developing crosseval and genetools side by side, install the local checkout
+after syncing:
+
+```bash
+uv pip install -e ../genetools
+```

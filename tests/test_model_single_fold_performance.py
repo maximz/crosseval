@@ -244,6 +244,21 @@ def test_ModelSingleFoldPerformance_apply_abstention_mask_empty_mask(
     assert original_scores == single_perf.scores()
 
 
+def test_ModelSingleFoldPerformance_apply_abstention_mask_rejects_non_boolean_mask():
+    single_perf = crosseval.ModelSingleFoldPerformance(
+        model_name="model",
+        fold_id=0,
+        y_true=np.array(["a", "b", "c"]),
+        y_pred=np.array(["a", "b", "c"]),
+        class_names=np.array(["a", "b", "c"]),
+        fold_label_train="train",
+        fold_label_test="test",
+    )
+
+    with pytest.raises(TypeError, match="boolean mask"):
+        single_perf.apply_abstention_mask(np.array([0, 1, 0]))
+
+
 def test_ModelSingleFoldPerformance_apply_abstention_mask_entire_mask(
     sample_data, sample_data_two, models_factory
 ):

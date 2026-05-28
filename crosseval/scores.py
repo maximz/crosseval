@@ -1,8 +1,12 @@
+import logging
 from typing import Callable, Dict, Tuple, Optional
 
 import numpy as np
 
 from crosseval import Metric, DEFAULT_LABEL_SCORERS, DEFAULT_PROBABILITY_SCORERS
+
+
+logger = logging.getLogger(__name__)
 
 
 def coerce_incomparable_label_arrays(*arrays):
@@ -60,9 +64,12 @@ def compute_classification_scores(
                 friendly_name=label_scorer_friendly_name,
             )
         except Exception as err:
-            raise RuntimeError(
-                f"Error in evaluating label-based metric {label_scorer_name}"
-            ) from err
+            logger.warning(
+                "Error in evaluating label-based metric %s: %s",
+                label_scorer_name,
+                err,
+                exc_info=True,
+            )
     if y_preds_proba is not None:
         if y_preds_proba_classes is None:
             raise ValueError(
@@ -95,7 +102,10 @@ def compute_classification_scores(
                     friendly_name=probability_scorer_friendly_name,
                 )
             except Exception as err:
-                raise RuntimeError(
-                    f"Error in evaluating predict-proba-based metric {probability_scorer_name}"
-                ) from err
+                logger.warning(
+                    "Error in evaluating predict-proba-based metric %s: %s",
+                    probability_scorer_name,
+                    err,
+                    exc_info=True,
+                )
     return output

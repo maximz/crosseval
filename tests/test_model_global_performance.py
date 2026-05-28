@@ -5,7 +5,6 @@ import copy
 import pickle
 
 import numpy as np
-import pytest
 
 
 def test_sentinel_value():
@@ -184,7 +183,7 @@ def test_global_scores_recomputes_after_fold_output_changes():
     assert second_scores["Accuracy"] == 1.0
 
 
-def test_global_scores_rejects_probability_scorers():
+def test_global_scores_ignores_probability_scorers_for_backwards_compatibility():
     perf = crosseval.ModelGlobalPerformance(
         model_name="model",
         per_fold_outputs={
@@ -202,16 +201,19 @@ def test_global_scores_rejects_probability_scorers():
         abstain_label="Unknown",
     )
 
-    with pytest.raises(ValueError, match="probability_scorers"):
-        perf.global_scores(
-            probability_scorers={
-                "custom": (
-                    lambda y_true, y_score, labels, sample_weight=None: 1,
-                    "Custom probability",
-                    {},
-                )
-            },
-        )
+    scores = perf.global_scores(
+        probability_scorers={
+            "custom": (
+                lambda y_true, y_score, labels, sample_weight=None: 1,
+                "Custom probability",
+                {},
+            )
+        },
+        formatted=False,
+    )
+
+    assert scores["Accuracy"] == 1.0
+    assert "Custom probability" not in scores
 
 
 def test_full_report_scores_keep_probability_scorers_per_fold_only():
@@ -248,6 +250,48 @@ def test_full_report_scores_keep_probability_scorers_per_fold_only():
 
     assert scores["per_fold"]["Custom probability"] == 0.5
     assert "Custom probability" not in scores["global"]
+
+
+def test_one_class_fold_skips_unavailable_probability_metrics():
+    perf = crosseval.ModelGlobalPerformance(
+        model_name="model",
+        per_fold_outputs={
+            0: crosseval.ModelSingleFoldPerformance(
+                model_name="model",
+                fold_id=0,
+                y_true=np.array(["a", "a"]),
+                y_pred=np.array(["a", "a"]),
+                y_preds_proba=np.array([[0.9, 0.1], [0.8, 0.2]]),
+                class_names=np.array(["a", "b"]),
+                fold_label_train="train",
+                fold_label_test="test",
+            ),
+            1: crosseval.ModelSingleFoldPerformance(
+                model_name="model",
+                fold_id=1,
+                y_true=np.array(["a", "b"]),
+                y_pred=np.array(["a", "b"]),
+                y_preds_proba=np.array([[0.9, 0.1], [0.1, 0.9]]),
+                class_names=np.array(["a", "b"]),
+                fold_label_train="train",
+                fold_label_test="test",
+            ),
+        },
+        abstain_label="Unknown",
+    )
+
+    scores = perf.aggregated_per_fold_scores(
+        label_scorers={
+            "accuracy": (
+                lambda y_true, y_pred, sample_weight=None: np.mean(y_true == y_pred),
+                "Accuracy",
+                {},
+            )
+        }
+    )
+
+    assert scores["Accuracy"] == "1.000 +/- 0.000 (in 2 folds)"
+    assert scores["ROC-AUC (weighted OvO)"] == "1.000 +/- 0.000 (in 1 folds)"
 
 
 def test_numeric_labels_with_string_abstention_label_score_correctly():

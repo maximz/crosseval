@@ -759,16 +759,11 @@ class ModelGlobalPerformance:
         When ``formatted`` is True (default), metric values are 3-decimal strings.
         When False, metric values are raw floats. Non-metric string entries
         (``"Abstention label"``, ``"Global evaluation column name"``) pass through
-        unchanged in both modes.
+        unchanged in both modes. ``probability_scorers`` is accepted for
+        compatibility with callers that pass the same scorer bundle to per-fold and
+        global summaries, but probability-based metrics are intentionally ignored
+        for global scores.
         """
-        if probability_scorers is not None and len(probability_scorers) > 0:
-            raise ValueError(
-                "global_scores does not support probability_scorers because global "
-                "probability metrics require comparable probability columns across "
-                "fold-specific classifiers. Use aggregated_per_fold_scores for "
-                "probability-based metrics."
-            )
-
         scores = compute_classification_scores(
             y_true=self.cv_y_true_with_abstention
             if with_abstention

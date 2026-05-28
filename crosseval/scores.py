@@ -5,7 +5,33 @@ import numpy as np
 
 from crosseval import Metric, DEFAULT_LABEL_SCORERS, DEFAULT_PROBABILITY_SCORERS
 
+
 logger = logging.getLogger(__name__)
+
+
+def coerce_incomparable_label_arrays(*arrays):
+    """Cast label arrays to strings only when mixed Python types cannot be sorted."""
+    non_null_arrays = [np.asarray(array) for array in arrays if array is not None]
+    if len(non_null_arrays) == 0:
+        return arrays
+
+    # Fast path: skip the expensive concatenate+unique probe when the labels are
+    # guaranteed internally sortable. Homogeneous numeric arrays intermix fine, and
+    # a single shared non-object dtype kind (e.g. all strings) is always sortable.
+    # Unsortable cases only arise from object dtype or mixing kinds (e.g. numbers
+    # with strings), which fall through to the probe below.
+    kinds = {array.dtype.kind for array in non_null_arrays}
+    if "O" not in kinds and (kinds <= set("biufc") or len(kinds) == 1):
+        return arrays
+
+    labels = np.concatenate([array.astype(object).ravel() for array in non_null_arrays])
+    try:
+        np.unique(labels)
+    except TypeError:
+        return tuple(
+            None if array is None else np.asarray(array).astype(str) for array in arrays
+        )
+    return arrays
 
 
 def compute_classification_scores(
@@ -22,6 +48,9 @@ def compute_classification_scores(
     """
     if len(y_true) == 0:
         raise ValueError("Cannot compute scores when y_true is empty.")
+    y_true, y_preds, y_preds_proba_classes = coerce_incomparable_label_arrays(
+        y_true, y_preds, y_preds_proba_classes
+    )
 
     # Default metrics
     if label_scorers is None:
@@ -43,8 +72,11 @@ def compute_classification_scores(
                 friendly_name=label_scorer_friendly_name,
             )
         except Exception as err:
-            logger.error(
-                f"Error in evaluating label-based metric {label_scorer_name}: {err}"
+            logger.warning(
+                "Error in evaluating label-based metric %s: %s",
+                label_scorer_name,
+                err,
+                exc_info=True,
             )
     if y_preds_proba is not None:
         if y_preds_proba_classes is None:
@@ -78,7 +110,10 @@ def compute_classification_scores(
                     friendly_name=probability_scorer_friendly_name,
                 )
             except Exception as err:
-                logger.error(
-                    f"Error in evaluating predict-proba-based metric {probability_scorer_name}: {err}"
+                logger.warning(
+                    "Error in evaluating predict-proba-based metric %s: %s",
+                    probability_scorer_name,
+                    err,
+                    exc_info=True,
                 )
     return output

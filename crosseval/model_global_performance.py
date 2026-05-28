@@ -1,12 +1,20 @@
 import collections.abc
 import logging
 from dataclasses import dataclass
-from functools import cache, cached_property
+from functools import cached_property
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Tuple, Union, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Tuple,
+    Union,
+    Optional,
+)
 
-import genetools
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import sentinels
@@ -15,15 +23,17 @@ from sklearn.metrics import (
 )
 
 
-from genetools.plots import plot_confusion_matrix
-from genetools.stats import make_confusion_matrix
-
-
 import multiclass_metrics
 
 from crosseval import ModelSingleFoldPerformance, Metric, Classifier
-from crosseval.utils import support_list_and_dict_arguments_in_cache_decorator
-from crosseval.scores import compute_classification_scores
+from crosseval.defaults import DEFAULT_LABEL_SCORERS, DEFAULT_PROBABILITY_SCORERS
+from crosseval.scores import (
+    coerce_incomparable_label_arrays,
+    compute_classification_scores,
+)
+
+if TYPE_CHECKING:
+    import matplotlib.figure
 
 
 logger = logging.getLogger(__name__)
@@ -51,9 +61,82 @@ def _stack_numpy_arrays_horizontally_into_string_array(
     return np.array([", ".join(item) for item in np.column_stack(arrs).astype(str)])
 
 
-@dataclass(eq=False)
+def _map_dataframe_values(df: pd.DataFrame, func: Callable) -> pd.DataFrame:
+    """Map every DataFrame cell with pandas 2.0 and newer."""
+    if hasattr(pd.DataFrame, "map"):
+        return df.map(func)
+    return df.applymap(func)
+
+
+def _default_cache_token(value: Any) -> Any:
+    """Convert default scorer kwargs to a cache token."""
+    # Default scorer kwargs are public mutable dictionaries. Convert their
+    # contents to deterministic tuples so mutating DEFAULT_* scorer kwargs
+    # invalidates the instance-local default-score cache.
+    if isinstance(value, dict):
+        return tuple(
+            sorted(
+                [
+                    (
+                        _default_cache_token(key),
+                        _default_cache_token(subvalue),
+                    )
+                    for key, subvalue in value.items()
+                ],
+                key=repr,
+            )
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_default_cache_token(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted((_default_cache_token(item) for item in value), key=repr))
+
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
+
+
+def _scorer_dict_fingerprint(scorers: Dict[str, Tuple[Callable, str, dict]]) -> Tuple:
+    """Fingerprint public default scorers for the instance-local cache key."""
+    # Include scorer function identity rather than trying to serialize callables.
+    # This catches realistic public-default mutations such as adding/removing a
+    # metric, replacing the function, changing the friendly name, or changing
+    # kwargs. Hidden mutable state inside a callable is intentionally out of
+    # scope; callers needing fully dynamic behavior should pass explicit scorer
+    # dictionaries, which bypass this cache.
+    return tuple(
+        (
+            scorer_name,
+            id(scorer_func),
+            scorer_friendly_name,
+            _default_cache_token(scorer_kwargs),
+        )
+        for scorer_name, (
+            scorer_func,
+            scorer_friendly_name,
+            scorer_kwargs,
+        ) in sorted(scorers.items(), key=lambda item: repr(item[0]))
+    )
+
+
+def _default_scorers_fingerprint() -> Tuple:
+    return (
+        _scorer_dict_fingerprint(DEFAULT_LABEL_SCORERS),
+        _scorer_dict_fingerprint(DEFAULT_PROBABILITY_SCORERS),
+    )
+
+
+@dataclass(eq=False, frozen=True)
 class ModelGlobalPerformance:
-    """Summarizes performance of one model across all CV folds."""
+    """Immutable snapshot summarizing one model across all CV folds.
+
+    The dataclass is shallow-frozen: top-level fields cannot be reassigned, but
+    contained objects such as ``per_fold_outputs`` and individual fold results are
+    not deeply immutable. Mutating fold internals after construction is
+    unsupported; build a new ``ModelGlobalPerformance`` instead.
+    """
 
     model_name: str
     per_fold_outputs: Dict[
@@ -188,17 +271,15 @@ class ModelGlobalPerformance:
     def fold_order(self) -> List[int]:
         return sorted(self.per_fold_outputs.keys())
 
-    @support_list_and_dict_arguments_in_cache_decorator
-    @cache
-    def aggregated_per_fold_scores(
+    def _compute_raw_metrics_per_fold(
         self,
-        with_abstention=True,
-        exclude_metrics_that_dont_factor_in_abstentions=False,
+        *,
+        with_abstention: bool,
+        exclude_metrics_that_dont_factor_in_abstentions: bool,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
-    ) -> Dict[str, str]:
-        """return dict mapping friendly-metric-name to "mean +/- std" formatted string (computed across folds)"""
-        raw_metrics_per_fold: Dict[int, Dict[str, Metric]] = {
+    ) -> Dict[int, Dict[str, Metric]]:
+        return {
             fold_id: fold_output.scores(
                 with_abstention=with_abstention,
                 exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
@@ -208,6 +289,71 @@ class ModelGlobalPerformance:
             )
             for fold_id, fold_output in self.per_fold_outputs.items()
         }
+
+    def _raw_metrics_per_fold(
+        self,
+        *,
+        with_abstention: bool,
+        exclude_metrics_that_dont_factor_in_abstentions: bool,
+        label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+    ) -> Dict[int, Dict[str, Metric]]:
+        """Return per-fold metrics, memoizing only the default scorer path."""
+        # Custom scorer dictionaries may contain mutable kwargs, closures, or
+        # stateful callables. Keep those calls fully dynamic and only cache the
+        # built-in default path used by repeated reporting methods.
+        if label_scorers is not None or probability_scorers is not None:
+            return self._compute_raw_metrics_per_fold(
+                with_abstention=with_abstention,
+                exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
+                label_scorers=label_scorers,
+                probability_scorers=probability_scorers,
+            )
+
+        cache_key = (
+            with_abstention,
+            exclude_metrics_that_dont_factor_in_abstentions,
+            _default_scorers_fingerprint(),
+        )
+        # This object is a shallow-frozen snapshot, but cached_property already
+        # uses __dict__ for internal memoization. Store this cache on the
+        # instance too, so it dies with the summary and does not globally pin
+        # large ModelGlobalPerformance objects.
+        cache = self.__dict__.setdefault("_default_raw_metrics_per_fold_cache", {})
+        if cache_key not in cache:
+            cache[cache_key] = self._compute_raw_metrics_per_fold(
+                with_abstention=with_abstention,
+                exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
+                label_scorers=None,
+                probability_scorers=None,
+            )
+        return cache[cache_key]
+
+    # The raw default per-fold scorer results are cached per instance. The public
+    # aggregation method remains uncached because formatting is cheap and custom
+    # scorer dictionaries/callables should stay fully dynamic.
+    def aggregated_per_fold_scores(
+        self,
+        with_abstention=True,
+        exclude_metrics_that_dont_factor_in_abstentions=False,
+        label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
+    ) -> Dict[str, Union[str, float]]:
+        """return dict mapping friendly-metric-name to per-fold aggregate.
+
+        When ``formatted`` is True (default), values are ``"mean +/- std (in N folds)"``
+        strings for human display. When False, values are the raw mean across folds as
+        a float — useful for programmatic downstream use where the caller wants to do
+        its own formatting or comparison. NaN-folds are dropped from the mean (matching
+        the formatted variant's count semantics).
+        """
+        raw_metrics_per_fold = self._raw_metrics_per_fold(
+            with_abstention=with_abstention,
+            exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
+            label_scorers=label_scorers,
+            probability_scorers=probability_scorers,
+        )
 
         # Put everything in a pandas df,
         # aggregate by (metric_keyname, metric_friendlyname),
@@ -236,8 +382,9 @@ class ModelGlobalPerformance:
                 )
             map_metric_keyname_to_friendly_name[colname] = friendly_names[0]
         # now change df to have values = metric value rather than full Metric object (again, note that a metric might not appear in all folds)
-        scores_per_fold = scores_per_fold.map(
-            lambda metric: metric.value if isinstance(metric, Metric) else np.nan
+        scores_per_fold = _map_dataframe_values(
+            scores_per_fold,
+            lambda metric: metric.value if isinstance(metric, Metric) else np.nan,
         )
 
         # aggregate mean, standard deviation, and non-NaN count (columns) for each metric keyname (index)
@@ -251,16 +398,23 @@ class ModelGlobalPerformance:
         ] = scores_per_fold_agg.index.to_series().map(
             map_metric_keyname_to_friendly_name
         )
-        if scores_per_fold_agg.isna().any().any():
-            raise ValueError("Scores_per_fold_agg had NaNs")
+        if scores_per_fold_agg["metric_friendly_name"].isna().any():
+            raise ValueError("Scores_per_fold_agg had metrics without friendly names")
         if scores_per_fold_agg["metric_friendly_name"].duplicated().any():
             raise ValueError("Some metrics had duplicate friendly names")
+
+        if not formatted:
+            # Raw float means for programmatic consumers.
+            return {
+                row["metric_friendly_name"]: float(row["mean"])
+                for _, row in scores_per_fold_agg.iterrows()
+            }
 
         # summarize a range of scores into strings: mean plus-minus one standard deviation (68% interval if normally distributed).
         return {
             row[
                 "metric_friendly_name"
-            ]: f"""{row['mean']:0.3f} +/- {row['std']:0.3f} (in {row['count']:n} folds)"""
+            ]: f"""{row["mean"]:0.3f} +/- {row["std"]:0.3f} (in {row["count"]:n} folds)"""
             for _, row in scores_per_fold_agg.iterrows()
         }
 
@@ -373,6 +527,11 @@ class ModelGlobalPerformance:
                 axis=0,
             ).reset_index(drop=True)
 
+        y_true, y_pred = coerce_incomparable_label_arrays(
+            output["y_true"].values, output["y_pred"].values
+        )
+        output = output.assign(y_true=y_true, y_pred=y_pred)
+
         return output
 
     def get_all_entries(self) -> pd.DataFrame:
@@ -424,12 +583,12 @@ class ModelGlobalPerformance:
 
         return true_vs_pred_labels
 
-    @property
+    @cached_property
     def cv_y_true_with_abstention(self) -> np.ndarray:
         """includes abstained ground truth labels"""
         return self._model_output_with_abstention["y_true"].values
 
-    @property
+    @cached_property
     def cv_y_pred_with_abstention(self) -> np.ndarray:
         """includes "Unknown" or similar when abstained on an example"""
         return self._model_output_with_abstention["y_pred"].values
@@ -586,11 +745,17 @@ class ModelGlobalPerformance:
             )
             y_preds_proba_concat.fillna(0.0, inplace=True)
 
+        label_ordering, proba_columns = coerce_incomparable_label_arrays(
+            np.asarray(self.confusion_matrix_label_ordering, dtype=object),
+            np.asarray(y_preds_proba_concat.columns, dtype=object),
+        )
+        y_preds_proba_concat.columns = proba_columns
+
         # So far we have included all class names ever predicted by any fold's model.
         # But it's possible there are other class names seen in the data.
         # Add any missing classes to the probability matrix.
         y_preds_proba_concat, labels = multiclass_metrics._inject_missing_labels(
-            y_true=self.confusion_matrix_label_ordering,
+            y_true=label_ordering,
             y_score=y_preds_proba_concat.values,
             labels=y_preds_proba_concat.columns,
         )
@@ -598,15 +763,11 @@ class ModelGlobalPerformance:
         y_preds_proba_concat = pd.DataFrame(y_preds_proba_concat, columns=labels)
 
         # Arrange columns in same order as cm_label_order
-        if set(y_preds_proba_concat.columns) != set(
-            self.confusion_matrix_label_ordering
-        ):
+        if set(y_preds_proba_concat.columns) != set(label_ordering):
             raise ValueError(
                 "y_preds_proba has different columns than confusion_matrix_label_ordering (without considering order)"
             )
-        y_preds_proba_concat = y_preds_proba_concat[
-            self.confusion_matrix_label_ordering
-        ]
+        y_preds_proba_concat = y_preds_proba_concat[label_ordering]
 
         return y_preds_proba_concat
 
@@ -625,17 +786,19 @@ class ModelGlobalPerformance:
         self,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ):
         scores = {
             "per_fold": self.aggregated_per_fold_scores(
                 with_abstention=False,
                 label_scorers=label_scorers,
                 probability_scorers=probability_scorers,
+                formatted=formatted,
             ),
             "global": self.global_scores(
                 with_abstention=False,
                 label_scorers=label_scorers,
-                probability_scorers=probability_scorers,
+                formatted=formatted,
             ),
         }
         if self.has_abstentions:
@@ -644,11 +807,12 @@ class ModelGlobalPerformance:
                 exclude_metrics_that_dont_factor_in_abstentions=True,
                 label_scorers=label_scorers,
                 probability_scorers=probability_scorers,
+                formatted=formatted,
             )
             scores["global_with_abstention"] = self.global_scores(
                 with_abstention=True,
                 label_scorers=label_scorers,
-                probability_scorers=probability_scorers,
+                formatted=formatted,
             )
         return scores
 
@@ -708,15 +872,29 @@ class ModelGlobalPerformance:
         )
         return "\n\n".join(pieces)
 
-    @support_list_and_dict_arguments_in_cache_decorator
-    @cache
+    # Intentionally uncached: this is a single compute_classification_scores call
+    # over already-cached concatenated CV arrays, so there is little to memoize.
+    # If a hot loop ever makes it worth caching, follow _raw_metrics_per_fold:
+    # cache only the default-scorer path, key by with_abstention and the default
+    # scorer fingerprint, and keep custom scorer dictionaries dynamic.
+    # Avoid functools.cache; it pins instances in memory and needs hashable args.
     def global_scores(
         self,
         with_abstention=True,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ) -> dict:
-        """Calculate global scores with or without abstention. Global scores should not include probabilistic scores."""
+        """Calculate global scores with or without abstention. Global scores should not include probabilistic scores.
+
+        When ``formatted`` is True (default), metric values are 3-decimal strings.
+        When False, metric values are raw floats. Non-metric string entries
+        (``"Abstention label"``, ``"Global evaluation column name"``) pass through
+        unchanged in both modes. ``probability_scorers`` is accepted for
+        compatibility with callers that pass the same scorer bundle to per-fold and
+        global summaries, but probability-based metrics are intentionally ignored
+        for global scores.
+        """
         scores = compute_classification_scores(
             y_true=self.cv_y_true_with_abstention
             if with_abstention
@@ -730,42 +908,52 @@ class ModelGlobalPerformance:
             if with_abstention
             else self.cv_sample_weights_without_abstention,
             label_scorers=label_scorers,
-            probability_scorers=probability_scorers,
+            probability_scorers={},
         )
-        # Format
-        scores_formatted = [
-            (metric.friendly_name, f"{metric.value:0.3f}")
-            for metric_keyname, metric in scores.items()
-        ]
+        if formatted:
+            scores_out = [
+                (metric.friendly_name, f"{metric.value:0.3f}")
+                for metric_keyname, metric in scores.items()
+            ]
+        else:
+            scores_out = [
+                (metric.friendly_name, float(metric.value))
+                for metric_keyname, metric in scores.items()
+            ]
         # confirm all metric friendly names are unique
-        all_metric_friendly_names = [v[0] for v in scores_formatted]
+        all_metric_friendly_names = [v[0] for v in scores_out]
         if len(set(all_metric_friendly_names)) != len(all_metric_friendly_names):
             raise ValueError("Metric friendly names are not unique")
 
         # then convert to dict
-        scores_formatted = dict(scores_formatted)
+        scores_out = dict(scores_out)
 
         if with_abstention:
-            scores_formatted[
-                "Unknown/abstention proportion"
-            ] = f"{self.abstention_proportion:0.3f}"
-            scores_formatted["Abstention label"] = self.abstain_label
+            scores_out["Unknown/abstention proportion"] = (
+                f"{self.abstention_proportion:0.3f}"
+                if formatted
+                else float(self.abstention_proportion)
+            )
+            scores_out["Abstention label"] = self.abstain_label
 
         if self.global_evaluation_column_name is not None:
-            scores_formatted[
+            scores_out[
                 "Global evaluation column name"
             ] = self.global_evaluation_column_name
 
-        return scores_formatted
+        return scores_out
 
     def _get_stats(
         self,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
     ):
         """Get overall stats for table"""
         scores = self._full_report_scores(
-            label_scorers=label_scorers, probability_scorers=probability_scorers
+            label_scorers=label_scorers,
+            probability_scorers=probability_scorers,
+            formatted=formatted,
         )
 
         # Combine all scores into single dictionary.
@@ -782,8 +970,15 @@ class ModelGlobalPerformance:
                 scores_dict[f"{k} {suffix}"] = v
 
         # Other summary stats.
-        nunique_predicted_labels = np.unique(self.cv_y_pred_without_abstention).shape[0]
-        nunique_true_labels = np.unique(self.cv_y_true_without_abstention).shape[0]
+        (
+            y_true_without_abstention,
+            y_pred_without_abstention,
+        ) = coerce_incomparable_label_arrays(
+            self.cv_y_true_without_abstention,
+            self.cv_y_pred_without_abstention,
+        )
+        predicted_labels = set(np.unique(y_pred_without_abstention))
+        true_labels = set(np.unique(y_true_without_abstention))
 
         scores_dict.update(
             {
@@ -791,8 +986,8 @@ class ModelGlobalPerformance:
                 "n_abstentions": self.n_abstentions,
                 "sample_size including abstentions": self.sample_size_with_abstentions,
                 "abstention_rate": self.abstention_proportion,
-                # Flag if number of unique predicted labels is less than number of unique ground truth labels
-                "missing_classes": nunique_predicted_labels < nunique_true_labels,
+                # Flag if any ground-truth class is absent from predictions.
+                "missing_classes": not true_labels.issubset(predicted_labels),
             }
         )
         return scores_dict
@@ -821,6 +1016,8 @@ class ModelGlobalPerformance:
         confusion_matrix_pred_label="Predicted label",
     ) -> pd.DataFrame:
         """Confusion matrix"""
+        from genetools.stats import make_confusion_matrix
+
         return make_confusion_matrix(
             y_true=self.cv_y_true_with_abstention,
             y_pred=self.cv_y_pred_with_abstention,
@@ -834,8 +1031,11 @@ class ModelGlobalPerformance:
         confusion_matrix_figsize: Optional[Tuple[float, float]] = None,
         confusion_matrix_true_label="Patient of origin",
         confusion_matrix_pred_label="Predicted label",
-    ) -> plt.Figure:
+    ) -> "matplotlib.figure.Figure":
         """Confusion matrix figure"""
+        import matplotlib.pyplot as plt
+        from genetools.plots import plot_confusion_matrix
+
         fig, ax = plot_confusion_matrix(
             self.confusion_matrix(
                 confusion_matrix_true_label=confusion_matrix_true_label,
@@ -877,7 +1077,9 @@ class ModelGlobalPerformance:
         )
 
         # Save confusion matrix figure
-        genetools.plots.savefig(
+        from genetools.plots import savefig
+
+        savefig(
             self.confusion_matrix_fig(
                 confusion_matrix_figsize=confusion_matrix_figsize,
                 confusion_matrix_true_label=confusion_matrix_true_label,
@@ -887,7 +1089,7 @@ class ModelGlobalPerformance:
             dpi=dpi,
         )
 
-    @property
+    @cached_property
     def per_fold_classifiers(self) -> Dict[int, Classifier]:
         """reload classifier objects from disk"""
         return {

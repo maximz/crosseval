@@ -48,15 +48,15 @@ clean-test: ## remove test and coverage artifacts
 	rm -fr .pytest_cache
 
 lint: # runs on all files (slow)
-	pre-commit run --all-files --show-diff-on-failure
+	uv run pre-commit run --all-files --show-diff-on-failure
 
 test: ## run tests quickly with the default Python
-	pytest
+	uv run pytest
 
 coverage: ## check code coverage quickly with the default Python
-	coverage run --source crosseval -m pytest
-	coverage report -m
-	coverage html
+	uv run coverage run --source crosseval -m pytest
+	uv run coverage report -m
+	uv run coverage html
 	$(BROWSER) htmlcov/index.html
 
 docs: ## generate Sphinx HTML documentation, including API docs

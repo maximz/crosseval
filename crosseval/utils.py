@@ -1,7 +1,8 @@
 import logging
-import functools
 from typing import Any, Union
 
+import numpy as np
+import pandas as pd
 from sklearn.base import BaseEstimator
 from sklearn.pipeline import Pipeline
 
@@ -16,7 +17,7 @@ Classifier = Union[Pipeline, BaseEstimator]
 
 def is_clf_a_sklearn_pipeline(clf: Classifier) -> bool:
     # clf may be an individual estimator, or it may be a pipeline, in which case the estimator is the final pipeline step
-    return type(clf) == Pipeline
+    return isinstance(clf, Pipeline)
 
 
 def _get_final_estimator_if_pipeline(clf: Classifier) -> BaseEstimator:
@@ -27,42 +28,26 @@ def _get_final_estimator_if_pipeline(clf: Classifier) -> BaseEstimator:
         return clf
 
 
-####
+def validate_boolean_mask(
+    mask: np.ndarray, expected_length: int, value_name: str = "mask"
+) -> np.ndarray:
+    """Validate a positional boolean mask and return it as a NumPy array."""
+    mask_array = np.asarray(mask)
+    if mask_array.ndim != 1:
+        raise ValueError(f"{value_name} must be a one-dimensional boolean mask")
+    if mask_array.dtype != bool:
+        raise TypeError(f"{value_name} must be a boolean mask")
+    if mask_array.shape[0] != expected_length:
+        raise ValueError(
+            f"Must supply boolean mask, but got {value_name}.shape[0] ({mask_array.shape[0]}) != expected length ({expected_length})"
+        )
+    return mask_array
 
 
-def support_list_and_dict_arguments_in_cache_decorator(func):
-    """Cache decorator normally fails with list or dict arguments, throwing e.g. "TypeError: unhashable type: 'dict'"
-    This additional decorator makes dict/list arguments immutable, recursing into making their values immutable too.
-    From https://stackoverflow.com/a/53394430/130164 and https://stackoverflow.com/a/66729248/130164
-    Alternative: https://stackoverflow.com/a/44776960/130164
-    """
-
-    def _make_immutable(obj: Any):
-        from frozendict import frozendict
-        from collections.abc import Collection, Mapping, Hashable
-
-        if isinstance(obj, str):
-            # short circuit for strings, which are iterable but we don't want to recurse into
-            return obj
-        if isinstance(obj, Mapping):
-            # dict -> frozendict, recursing inwards on values
-            return frozendict({k: _make_immutable(v) for k, v in obj.items()})
-        elif isinstance(obj, Collection):
-            # list -> tuple, recursing inwards on values
-            return tuple(_make_immutable(i) for i in obj)
-        elif not isinstance(obj, Hashable):
-            # other unhashable type - we don't know what to do
-            raise TypeError(f"Unhashable type: {type(obj)}")
-        # already hashable
-        return obj
-
-    @functools.wraps(func)
-    def wrapped(*args, **kwargs):
-        # make the args (tuple) and kwargs (dict) have immutable contents
-        return func(*_make_immutable(args), **_make_immutable(kwargs))
-
-    # Preserve lru_cache functionality (https://stackoverflow.com/questions/6358481/using-functools-lru-cache-with-dictionary-arguments#comment88158142_44776960)
-    wrapped.cache_info = func.cache_info
-    wrapped.cache_clear = func.cache_clear
-
-    return wrapped
+def index_rows_by_mask(value: Any, mask: np.ndarray):
+    """Index rows positionally for pandas and array-like values."""
+    if value is None:
+        return None
+    if isinstance(value, (pd.DataFrame, pd.Series)):
+        return value.iloc[mask].copy()
+    return np.asarray(value)[mask]

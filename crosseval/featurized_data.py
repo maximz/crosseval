@@ -7,8 +7,14 @@ from typing_extensions import Self
 import numpy as np
 import pandas as pd
 
+from crosseval.utils import index_rows_by_mask, validate_boolean_mask
+
 
 logger = logging.getLogger(__name__)
+
+
+def _row_count(value: Any) -> int:
+    return value.shape[0] if hasattr(value, "shape") else len(value)
 
 
 @dataclass(eq=False)
@@ -37,10 +43,6 @@ class FeaturizedData:
     extras: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        # TODO: validate that if any abstain field is provided, then all are provided
-        # TODO: if y or sample_names were python lists, convert to numpy arrays, so we can index.
-        # TODO: validate that X.shape[0] == y.shape[0] == sample_names.shape[0] == metadata.shape[0]
-
         # Convert explicitly provided None values to default_factory generated values, for consistency.
         # For example, if constructor given test_metadata=None, replace with empty DataFrame as we would if test_metadata kwarg was missing.
         # https://stackoverflow.com/a/55839223/130164
@@ -50,6 +52,52 @@ class FeaturizedData:
             ) and f.default_factory is not dataclasses.MISSING:
                 setattr(self, f.name, f.default_factory())
 
+        if not isinstance(self.X, pd.DataFrame):
+            self.X = np.asarray(self.X)
+        n_samples = _row_count(self.X)
+
+        if not isinstance(self.y, pd.Series):
+            self.y = np.asarray(self.y)
+        if _row_count(self.y) != n_samples:
+            raise ValueError("X and y must have the same number of rows.")
+
+        if self.sample_names is None:
+            self.sample_names = np.arange(n_samples)
+        elif not isinstance(self.sample_names, (pd.Series, pd.Index)):
+            self.sample_names = np.asarray(self.sample_names)
+        if _row_count(self.sample_names) != n_samples:
+            raise ValueError("sample_names must match X and y row count.")
+
+        if self.metadata is None:
+            self.metadata = pd.DataFrame(index=np.arange(n_samples))
+        elif not isinstance(self.metadata, pd.DataFrame):
+            raise TypeError("metadata must be a pandas DataFrame or None.")
+        if self.metadata.shape[0] != n_samples:
+            raise ValueError("metadata must match X and y row count.")
+
+        if self.sample_weights is not None:
+            if not isinstance(self.sample_weights, pd.Series):
+                self.sample_weights = np.asarray(self.sample_weights)
+            if _row_count(self.sample_weights) != n_samples:
+                raise ValueError("sample_weights must match X and y row count.")
+
+        if not isinstance(self.abstained_sample_names, (pd.Series, pd.Index)):
+            self.abstained_sample_names = np.asarray(self.abstained_sample_names)
+        if not isinstance(self.abstained_sample_y, pd.Series):
+            self.abstained_sample_y = np.asarray(self.abstained_sample_y)
+        if not isinstance(self.abstained_sample_metadata, pd.DataFrame):
+            raise TypeError("abstained_sample_metadata must be a pandas DataFrame.")
+
+        n_abstained = _row_count(self.abstained_sample_y)
+        if _row_count(self.abstained_sample_names) != n_abstained:
+            raise ValueError(
+                "abstained_sample_names and abstained_sample_y must have the same length."
+            )
+        if self.abstained_sample_metadata.shape[0] != n_abstained:
+            raise ValueError(
+                "abstained_sample_metadata must match abstained_sample_y row count."
+            )
+
     # TODO: add abstained_sample_weights?
 
     def copy(self) -> Self:
@@ -58,25 +106,30 @@ class FeaturizedData:
 
     def apply_abstention_mask(self, mask: np.ndarray) -> Self:
         """Pass a boolean mask. Returns a copy of self with the mask samples turned into abstentions."""
-        if mask.shape[0] != self.X.shape[0]:
-            raise ValueError(
-                f"Must supply boolean mask, but got mask.shape[0] ({mask.shape[0]}) != self.X.shape[0] ({self.X.shape[0]})"
-            )
+        mask = validate_boolean_mask(
+            mask, expected_length=_row_count(self.X), value_name="mask"
+        )
         return dataclasses.replace(
             self,
-            X=self.X[~mask],
-            y=self.y[~mask],
-            sample_names=self.sample_names[~mask],
-            metadata=self.metadata[~mask],
-            sample_weights=self.sample_weights[~mask]
-            if self.sample_weights is not None
-            else None,
+            X=index_rows_by_mask(self.X, ~mask),
+            y=index_rows_by_mask(self.y, ~mask),
+            sample_names=index_rows_by_mask(self.sample_names, ~mask),
+            metadata=index_rows_by_mask(self.metadata, ~mask),
+            sample_weights=index_rows_by_mask(self.sample_weights, ~mask),
             abstained_sample_names=np.hstack(
-                [self.abstained_sample_names, self.sample_names[mask]]
+                [
+                    self.abstained_sample_names,
+                    index_rows_by_mask(self.sample_names, mask),
+                ]
             ),
-            abstained_sample_y=np.hstack([self.abstained_sample_y, self.y[mask]]),
+            abstained_sample_y=np.hstack(
+                [self.abstained_sample_y, index_rows_by_mask(self.y, mask)]
+            ),
             abstained_sample_metadata=pd.concat(
-                [self.abstained_sample_metadata, self.metadata[mask]],
+                [
+                    self.abstained_sample_metadata,
+                    index_rows_by_mask(self.metadata, mask),
+                ],
                 axis=0,
             ),
             # All other fields (i.e. "extras") stay the same

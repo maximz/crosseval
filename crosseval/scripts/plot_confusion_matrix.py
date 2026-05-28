@@ -1,13 +1,12 @@
 """plotconfusion CLI command."""
 
 import pandas as pd
-import genetools
-from genetools.plots import plot_confusion_matrix
 from typing import Optional
 import matplotlib.pyplot as plt
 from pathlib import Path
 import seaborn as sns
 import typer
+from genetools.plots import plot_confusion_matrix, savefig, wrap_tick_labels
 
 app = typer.Typer()
 
@@ -59,14 +58,14 @@ def plot(
     )
     # Wrap labels if needed
     if wrapx > 0:
-        genetools.plots.wrap_tick_labels(
+        wrap_tick_labels(
             ax,
             wrap_amount=wrapx,
             wrap_x_axis=True,
             wrap_y_axis=False,
         )
     if wrapy > 0:
-        genetools.plots.wrap_tick_labels(
+        wrap_tick_labels(
             ax,
             wrap_amount=wrapy,
             wrap_x_axis=False,
@@ -81,7 +80,7 @@ def plot(
         else:
             # Replace suffix with ".png"
             output: Path = input_fname.with_suffix(".png")
-    genetools.plots.savefig(
+    savefig(
         fig,
         output,
         dpi=dpi,

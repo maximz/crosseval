@@ -88,6 +88,8 @@ def train_classifier(
         try:
             joblib.dump(clf, export_clf_fname)
         except Exception as err:
-            logger.error(f"Error in saving classifier {model_name} to disk: {err}")
+            raise RuntimeError(
+                f"Error in saving classifier {model_name} to disk"
+            ) from err
 
     return clf, elapsed_time

@@ -23,7 +23,15 @@ class ExperimentSetGlobalPerformance:
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         sort=True,
+        formatted: bool = True,
     ):
+        """Cross-fold comparison table, one row per model.
+
+        ``formatted=True`` (default) renders per-fold means as
+        ``"mean +/- std (in N folds)"`` strings and globals as 3-decimal strings,
+        for human display. ``formatted=False`` returns raw floats, suitable for
+        programmatic sorting or downstream aggregation.
+        """
         if len(self.model_global_performances) == 0:
             # Edge case: empty
             return pd.DataFrame()
@@ -32,7 +40,9 @@ class ExperimentSetGlobalPerformance:
         combined_stats = pd.DataFrame.from_dict(
             {
                 model_name: model_global_performance._get_stats(
-                    label_scorers=label_scorers, probability_scorers=probability_scorers
+                    label_scorers=label_scorers,
+                    probability_scorers=probability_scorers,
+                    formatted=formatted,
                 )
                 for model_name, model_global_performance in self.model_global_performances.items()
             },

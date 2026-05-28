@@ -210,6 +210,15 @@ class ModelGlobalPerformance:
     def fold_order(self) -> List[int]:
         return sorted(self.per_fold_outputs.keys())
 
+    # Intentionally uncached: each call recomputes. Fold concatenations / global
+    # snapshot arrays are already cached via cached_property, but per-fold metric
+    # calculation (fold_output.scores(...), a plain method) plus the aggregation
+    # arithmetic here are repeated every call. We could memoize across calls, but
+    # NOT with functools.cache on a method: it keys on self and lives for the life
+    # of the process, pinning every instance in memory (leak), and needs the dict
+    # args (label_scorers/probability_scorers) made hashable. If a hot loop ever
+    # re-calls this on the same instance with identical args, add a per-instance
+    # memoizer (dies with the instance) instead.
     def aggregated_per_fold_scores(
         self,
         with_abstention=True,
@@ -754,6 +763,9 @@ class ModelGlobalPerformance:
         )
         return "\n\n".join(pieces)
 
+    # Intentionally uncached: same tradeoff as aggregated_per_fold_scores above.
+    # functools.cache would pin instances in memory and require hashable dict args;
+    # prefer a per-instance memoizer if a hot loop ever needs caching here.
     def global_scores(
         self,
         with_abstention=True,

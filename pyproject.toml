@@ -24,7 +24,6 @@ classifiers = [
 dependencies = [
     "Click>=7.0",
     "enum-mixins",
-    "frozendict",
     "genetools>=0.7.5",
     "joblib",
     "kdict",

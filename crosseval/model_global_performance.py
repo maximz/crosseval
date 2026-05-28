@@ -963,9 +963,9 @@ class ModelGlobalPerformance:
                 if formatted
                 else float(self.abstention_proportion)
             )
-            scores_out["abstention_label" if keyname_mode else "Abstention label"] = (
-                self.abstain_label
-            )
+            scores_out[
+                "abstention_label" if keyname_mode else "Abstention label"
+            ] = self.abstain_label
 
         if self.global_evaluation_column_name is not None:
             scores_out[

@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Tuple, Union, Optional
+from typing import Callable, Dict, Literal, Tuple, Union, Optional
 
 import pandas as pd
 
@@ -24,6 +24,7 @@ class ExperimentSetGlobalPerformance:
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         sort=True,
         formatted: bool = True,
+        column_format: Literal["friendly", "keyname"] = "friendly",
     ):
         """Cross-fold comparison table, one row per model.
 
@@ -31,7 +32,18 @@ class ExperimentSetGlobalPerformance:
         ``"mean +/- std (in N folds)"`` strings and globals as 3-decimal strings,
         for human display. ``formatted=False`` returns raw floats, suitable for
         programmatic sorting or downstream aggregation.
+
+        ``column_format`` controls the metric column names: ``"friendly"`` (default)
+        uses friendly metric names (e.g. ``"MCC per fold"``); ``"keyname"`` uses the
+        stable scorer keynames instead (e.g. ``"mcc per fold"``), so consumers get
+        machine keys directly without reverse-engineering the friendly-to-keyname map.
+        The per-fold/global and with/without-abstention suffixes, the ``sample_size``
+        column, and the other non-metric summary columns are unchanged in both modes.
         """
+        if column_format not in ("friendly", "keyname"):
+            raise ValueError(
+                f"column_format must be 'friendly' or 'keyname', not {column_format!r}"
+            )
         if len(self.model_global_performances) == 0:
             # Edge case: empty
             return pd.DataFrame()
@@ -43,6 +55,7 @@ class ExperimentSetGlobalPerformance:
                     label_scorers=label_scorers,
                     probability_scorers=probability_scorers,
                     formatted=formatted,
+                    column_format=column_format,
                 )
                 for model_name, model_global_performance in self.model_global_performances.items()
             },

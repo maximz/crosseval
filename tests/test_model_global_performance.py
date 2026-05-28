@@ -117,6 +117,104 @@ def test_model_comparison_stats_formatted_false_returns_numeric_scores():
     assert stats.loc["model", "Accuracy global"] == 1.0
 
 
+def test_model_comparison_stats_keyname_columns_use_metric_keynames():
+    # Two folds with an abstention in one fold, so the with-abstention columns appear.
+    perf = crosseval.ModelGlobalPerformance(
+        model_name="model",
+        per_fold_outputs={
+            0: crosseval.ModelSingleFoldPerformance(
+                model_name="model",
+                fold_id=0,
+                y_true=np.array(["a", "b"]),
+                y_pred=np.array(["a", "b"]),
+                class_names=np.array(["a", "b"]),
+                fold_label_train="train",
+                fold_label_test="test",
+                test_abstentions=np.array(["a"]),
+            ),
+            1: crosseval.ModelSingleFoldPerformance(
+                model_name="model",
+                fold_id=1,
+                y_true=np.array(["a", "b"]),
+                y_pred=np.array(["a", "b"]),
+                class_names=np.array(["a", "b"]),
+                fold_label_train="train",
+                fold_label_test="test",
+            ),
+        },
+        abstain_label="Unknown",
+    )
+    experiment = crosseval.ExperimentSetGlobalPerformance({"model": perf})
+
+    label_scorers = {
+        "accuracy": (lambda y_true, y_pred, sample_weight=None: 1.0, "Accuracy", {}),
+        "mcc": (lambda y_true, y_pred, sample_weight=None: 0.5, "MCC", {}),
+    }
+
+    friendly = experiment.get_model_comparison_stats(
+        label_scorers=label_scorers,
+        probability_scorers={},
+        formatted=False,
+        sort=False,
+    )
+    keyname = experiment.get_model_comparison_stats(
+        label_scorers=label_scorers,
+        probability_scorers={},
+        formatted=False,
+        sort=False,
+        column_format="keyname",
+    )
+
+    # Default friendly columns are unchanged: friendly metric names + suffixes.
+    assert {
+        "Accuracy per fold",
+        "MCC per fold",
+        "Accuracy global",
+        "MCC global",
+        "Accuracy per fold with abstention",
+        "MCC per fold with abstention",
+        "Accuracy global with abstention",
+        "MCC global with abstention",
+    }.issubset(friendly.columns)
+
+    # The keyname metric columns are exactly the metric keynames plus suffixes,
+    # including the with_abstention variants.
+    expected_keyname_metric_cols = {
+        "accuracy per fold",
+        "mcc per fold",
+        "accuracy global",
+        "mcc global",
+        "accuracy per fold with abstention",
+        "mcc per fold with abstention",
+        "accuracy global with abstention",
+        "mcc global with abstention",
+    }
+    assert expected_keyname_metric_cols.issubset(keyname.columns)
+
+    # No friendly metric string leaks through into the keyname columns.
+    for friendly_name in ("Accuracy", "MCC", "Unknown/abstention proportion"):
+        assert not any(friendly_name in col for col in keyname.columns)
+
+    # Non-metric summary columns and the abstention/non-abstention distinction are
+    # preserved identically in both modes.
+    for col in (
+        "sample_size",
+        "n_abstentions",
+        "sample_size including abstentions",
+        "abstention_rate",
+        "missing_classes",
+    ):
+        assert col in keyname.columns
+        assert col in friendly.columns
+
+    # Values match between the two column formats (same data, different keys).
+    assert keyname.loc["model", "mcc per fold"] == friendly.loc["model", "MCC per fold"]
+    assert (
+        keyname.loc["model", "mcc global with abstention"]
+        == friendly.loc["model", "MCC global with abstention"]
+    )
+
+
 def test_aggregated_per_fold_scores_supports_distinct_scorer_arguments():
     perf = crosseval.ModelGlobalPerformance(
         model_name="model",

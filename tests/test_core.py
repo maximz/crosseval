@@ -100,10 +100,12 @@ weighted avg       1.00      1.00      1.00        10
     )
 
     experiment_set_global_performance.export_all_models(
-        func_generate_classification_report_fname=lambda model_name: tmp_path
-        / f"{model_name}.classification_report.txt",
-        func_generate_confusion_matrix_fname=lambda model_name: tmp_path
-        / f"{model_name}.confusion_matrix.png",
+        func_generate_classification_report_fname=lambda model_name: (
+            tmp_path / f"{model_name}.classification_report.txt"
+        ),
+        func_generate_confusion_matrix_fname=lambda model_name: (
+            tmp_path / f"{model_name}.confusion_matrix.png"
+        ),
         confusion_matrix_figsize=(4, 4),
         dpi=72,
     )
@@ -254,10 +256,12 @@ weighted avg       1.00      0.83      0.90        12
     )
 
     experiment_set_global_performance.export_all_models(
-        func_generate_classification_report_fname=lambda model_name: tmp_path
-        / f"{model_name}.classification_report.txt",
-        func_generate_confusion_matrix_fname=lambda model_name: tmp_path
-        / f"{model_name}.confusion_matrix.png",
+        func_generate_classification_report_fname=lambda model_name: (
+            tmp_path / f"{model_name}.classification_report.txt"
+        ),
+        func_generate_confusion_matrix_fname=lambda model_name: (
+            tmp_path / f"{model_name}.confusion_matrix.png"
+        ),
         dpi=72,
     )
 
@@ -390,10 +394,12 @@ weighted avg       1.00      0.71      0.81        14
     )
 
     experiment_set_global_performance.export_all_models(
-        func_generate_classification_report_fname=lambda model_name: tmp_path
-        / f"{model_name}.classification_report.txt",
-        func_generate_confusion_matrix_fname=lambda model_name: tmp_path
-        / f"{model_name}.confusion_matrix.png",
+        func_generate_classification_report_fname=lambda model_name: (
+            tmp_path / f"{model_name}.classification_report.txt"
+        ),
+        func_generate_confusion_matrix_fname=lambda model_name: (
+            tmp_path / f"{model_name}.confusion_matrix.png"
+        ),
         dpi=72,
     )
 

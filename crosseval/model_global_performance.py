@@ -1,6 +1,7 @@
 import collections.abc
 import logging
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -66,9 +67,15 @@ def _map_dataframe_values(df: pd.DataFrame, func: Callable) -> pd.DataFrame:
     return df.applymap(func)
 
 
-@dataclass(eq=False)
+@dataclass(eq=False, frozen=True)
 class ModelGlobalPerformance:
-    """Summarizes performance of one model across all CV folds."""
+    """Immutable snapshot summarizing one model across all CV folds.
+
+    The dataclass is shallow-frozen: top-level fields cannot be reassigned, but
+    contained objects such as ``per_fold_outputs`` and individual fold results are
+    not deeply immutable. Mutating fold internals after construction is
+    unsupported; build a new ``ModelGlobalPerformance`` instead.
+    """
 
     model_name: str
     per_fold_outputs: Dict[
@@ -199,7 +206,7 @@ class ModelGlobalPerformance:
                     "Sample weights must have same shape as cv_y_pred + # of abstentions"
                 )
 
-    @property
+    @cached_property
     def fold_order(self) -> List[int]:
         return sorted(self.per_fold_outputs.keys())
 
@@ -354,7 +361,7 @@ class ModelGlobalPerformance:
         # combine
         return _stack_numpy_arrays_horizontally_into_string_array(values_to_combine)
 
-    @property
+    @cached_property
     def cv_y_true_without_abstention(self) -> np.ndarray:
         # sub in self.global_evaluation_column_name if defined
         return self._get_column_combination_or_pass_through(
@@ -366,13 +373,13 @@ class ModelGlobalPerformance:
             ),
         )
 
-    @property
+    @cached_property
     def cv_y_pred_without_abstention(self) -> np.ndarray:
         return self._concatenate_in_fold_order(
             "y_pred", self.per_fold_outputs, self.fold_order
         )
 
-    @property
+    @cached_property
     def _model_output_with_abstention(self) -> pd.DataFrame:
         output = pd.DataFrame(
             {
@@ -458,17 +465,17 @@ class ModelGlobalPerformance:
 
         return true_vs_pred_labels
 
-    @property
+    @cached_property
     def cv_y_true_with_abstention(self) -> np.ndarray:
         """includes abstained ground truth labels"""
         return self._model_output_with_abstention["y_true"].values
 
-    @property
+    @cached_property
     def cv_y_pred_with_abstention(self) -> np.ndarray:
         """includes "Unknown" or similar when abstained on an example"""
         return self._model_output_with_abstention["y_pred"].values
 
-    @property
+    @cached_property
     def cv_sample_weights_without_abstention(self) -> Union[np.ndarray, None]:
         """Combine test-set sample weights in fold order, if they were supplied"""
         if any(
@@ -482,7 +489,7 @@ class ModelGlobalPerformance:
             "test_sample_weights", self.per_fold_outputs, self.fold_order
         )
 
-    @property
+    @cached_property
     def _cv_abstentions_sample_weights(self) -> Union[np.ndarray, None]:
         """Concatenate sample weights (if supplied) of abstained test examples from each fold.
         (Abstentions don't necessarily need to occur in each fold, though.)
@@ -499,7 +506,7 @@ class ModelGlobalPerformance:
             "test_abstention_sample_weights", self.per_fold_outputs, self.fold_order
         )
 
-    @property
+    @cached_property
     def cv_sample_weights_with_abstention(self) -> Union[np.ndarray, None]:
         """Combine test-set sample weights in fold order, then add abstention sample weights if we had abstentions. Returns None if no sample weights supplied."""
         if not self.has_abstentions:
@@ -514,7 +521,7 @@ class ModelGlobalPerformance:
         # TODO: Switch to returning empty array, for consistency?
         return None
 
-    @property
+    @cached_property
     def cv_metadata(self) -> Union[pd.DataFrame, None]:
         """If supplied, concatenate dataframes of metadata for each test example, in fold order, not in original adata.obs order.
         If supplied in any fold, must be supplied for all folds.
@@ -530,7 +537,7 @@ class ModelGlobalPerformance:
             return test_metadata_concat
         return None
 
-    @property
+    @cached_property
     def cv_abstentions(self) -> np.ndarray:
         """Concatenate ground truth labels of abstained test examples from each fold.
         These don't necessarily need to be provided for each fold though.
@@ -539,7 +546,7 @@ class ModelGlobalPerformance:
             "test_abstentions", self.per_fold_outputs, self.fold_order
         )
 
-    @property
+    @cached_property
     def cv_abstentions_metadata(self) -> Union[pd.DataFrame, None]:
         """Concatenate metadata of abstained test examples from each fold.
         These don't necessarily need to be provided for each fold though.
@@ -555,28 +562,28 @@ class ModelGlobalPerformance:
             return test_metadata_concat
         return None
 
-    @property
+    @cached_property
     def sample_size_without_abstentions(self):
         return self.cv_y_true_without_abstention.shape[0]
 
-    @property
+    @cached_property
     def sample_size_with_abstentions(self):
         return self.cv_y_true_with_abstention.shape[0]
 
-    @property
+    @cached_property
     def n_abstentions(self):
         return self.cv_abstentions.shape[0]
 
-    @property
+    @cached_property
     def has_abstentions(self) -> bool:
         return self.cv_abstentions.shape[0] > 0
 
-    @property
+    @cached_property
     def abstention_proportion(self):
         """abstention proportion: what percentage of predictions were unknown"""
         return self.n_abstentions / self.sample_size_with_abstentions
 
-    @property
+    @cached_property
     def cv_y_preds_proba(self) -> Union[pd.DataFrame, None]:
         """Concatenate y_preds_proba (if supplied), in fold order, not in original adata.obs order.
         Abstentions never included here."""
@@ -646,7 +653,7 @@ class ModelGlobalPerformance:
 
         return y_preds_proba_concat
 
-    @property
+    @cached_property
     def classification_report(self) -> str:
         """Classification report"""
         # zero_division=0 is same as "warn" but suppresses this warning for labels with no predicted samples:
@@ -861,7 +868,7 @@ class ModelGlobalPerformance:
         )
         return scores_dict
 
-    @property
+    @cached_property
     def confusion_matrix_label_ordering(self) -> List[str]:
         """Order of labels in confusion matrix"""
         return sorted(
@@ -958,7 +965,7 @@ class ModelGlobalPerformance:
             dpi=dpi,
         )
 
-    @property
+    @cached_property
     def per_fold_classifiers(self) -> Dict[int, Classifier]:
         """reload classifier objects from disk"""
         return {
@@ -966,7 +973,7 @@ class ModelGlobalPerformance:
             for fold_id, model_single_fold_performance in self.per_fold_outputs.items()
         }
 
-    @property
+    @cached_property
     def feature_importances(self) -> Union[pd.DataFrame, None]:
         """
         Get feature importances for each fold.
@@ -987,7 +994,7 @@ class ModelGlobalPerformance:
             index="fold_id"
         )
 
-    @property
+    @cached_property
     def multiclass_feature_importances(self) -> Union[Dict[int, pd.DataFrame], None]:
         """
         Get One-vs-Rest multiclass feature importances for each fold.

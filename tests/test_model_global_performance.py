@@ -3,8 +3,10 @@ import crosseval
 
 import copy
 import pickle
+from dataclasses import FrozenInstanceError
 
 import numpy as np
+import pytest
 
 
 def test_sentinel_value():
@@ -115,26 +117,27 @@ def test_model_comparison_stats_formatted_false_returns_numeric_scores():
     assert stats.loc["model", "Accuracy global"] == 1.0
 
 
-def test_aggregated_per_fold_scores_recomputes_after_fold_output_changes():
-    fold = crosseval.ModelSingleFoldPerformance(
-        model_name="model",
-        fold_id=0,
-        y_true=np.array(["a", "b"]),
-        y_pred=np.array(["a", "a"]),
-        class_names=np.array(["a", "b"]),
-        fold_label_train="train",
-        fold_label_test="test",
-    )
+def test_aggregated_per_fold_scores_supports_distinct_scorer_arguments():
     perf = crosseval.ModelGlobalPerformance(
         model_name="model",
-        per_fold_outputs={0: fold},
+        per_fold_outputs={
+            0: crosseval.ModelSingleFoldPerformance(
+                model_name="model",
+                fold_id=0,
+                y_true=np.array(["a", "b"]),
+                y_pred=np.array(["a", "b"]),
+                class_names=np.array(["a", "b"]),
+                fold_label_train="train",
+                fold_label_test="test",
+            )
+        },
         abstain_label="Unknown",
     )
 
     first_scores = perf.aggregated_per_fold_scores(
         label_scorers={
             "accuracy": (
-                lambda y_true, y_pred, sample_weight=None: np.mean(y_true == y_pred),
+                lambda y_true, y_pred, sample_weight=None: 0.25,
                 "Accuracy",
                 {},
             )
@@ -142,11 +145,10 @@ def test_aggregated_per_fold_scores_recomputes_after_fold_output_changes():
         probability_scorers={},
         formatted=False,
     )
-    fold.y_pred = np.array(["a", "b"])
     second_scores = perf.aggregated_per_fold_scores(
         label_scorers={
             "accuracy": (
-                lambda y_true, y_pred, sample_weight=None: np.mean(y_true == y_pred),
+                lambda y_true, y_pred, sample_weight=None: 1.0,
                 "Accuracy",
                 {},
             )
@@ -155,11 +157,11 @@ def test_aggregated_per_fold_scores_recomputes_after_fold_output_changes():
         formatted=False,
     )
 
-    assert first_scores["Accuracy"] == 0.5
+    assert first_scores["Accuracy"] == 0.25
     assert second_scores["Accuracy"] == 1.0
 
 
-def test_global_scores_recomputes_after_fold_output_changes():
+def test_model_global_performance_is_shallow_frozen_snapshot():
     fold = crosseval.ModelSingleFoldPerformance(
         model_name="model",
         fold_id=0,
@@ -175,12 +177,15 @@ def test_global_scores_recomputes_after_fold_output_changes():
         abstain_label="Unknown",
     )
 
-    first_scores = perf.global_scores(formatted=False)
-    fold.y_pred = np.array(["a", "b"])
-    second_scores = perf.global_scores(formatted=False)
+    with pytest.raises(FrozenInstanceError):
+        perf.per_fold_outputs = {}
 
-    assert first_scores["Accuracy"] == 0.5
-    assert second_scores["Accuracy"] == 1.0
+    cached_y_pred = perf.cv_y_pred_without_abstention.copy()
+    fold.y_pred = np.array(["a", "b"])
+
+    assert np.array_equal(perf.per_fold_outputs[0].y_pred, np.array(["a", "b"]))
+    assert np.array_equal(perf.cv_y_pred_without_abstention, cached_y_pred)
+    assert perf.global_scores(formatted=False)["Accuracy"] == 0.5
 
 
 def test_global_scores_ignores_probability_scorers_for_backwards_compatibility():

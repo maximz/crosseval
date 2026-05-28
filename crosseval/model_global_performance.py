@@ -26,6 +26,7 @@ from sklearn.metrics import (
 import multiclass_metrics
 
 from crosseval import ModelSingleFoldPerformance, Metric, Classifier
+from crosseval.defaults import DEFAULT_LABEL_SCORERS, DEFAULT_PROBABILITY_SCORERS
 from crosseval.scores import (
     coerce_incomparable_label_arrays,
     compute_classification_scores,
@@ -65,6 +66,66 @@ def _map_dataframe_values(df: pd.DataFrame, func: Callable) -> pd.DataFrame:
     if hasattr(pd.DataFrame, "map"):
         return df.map(func)
     return df.applymap(func)
+
+
+def _default_cache_token(value: Any) -> Any:
+    """Convert default scorer kwargs to a cache token."""
+    # Default scorer kwargs are public mutable dictionaries. Convert their
+    # contents to deterministic tuples so mutating DEFAULT_* scorer kwargs
+    # invalidates the instance-local default-score cache.
+    if isinstance(value, dict):
+        return tuple(
+            sorted(
+                [
+                    (
+                        _default_cache_token(key),
+                        _default_cache_token(subvalue),
+                    )
+                    for key, subvalue in value.items()
+                ],
+                key=repr,
+            )
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_default_cache_token(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted((_default_cache_token(item) for item in value), key=repr))
+
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
+
+
+def _scorer_dict_fingerprint(scorers: Dict[str, Tuple[Callable, str, dict]]) -> Tuple:
+    """Fingerprint public default scorers for the instance-local cache key."""
+    # Include scorer function identity rather than trying to serialize callables.
+    # This catches realistic public-default mutations such as adding/removing a
+    # metric, replacing the function, changing the friendly name, or changing
+    # kwargs. Hidden mutable state inside a callable is intentionally out of
+    # scope; callers needing fully dynamic behavior should pass explicit scorer
+    # dictionaries, which bypass this cache.
+    return tuple(
+        (
+            scorer_name,
+            id(scorer_func),
+            scorer_friendly_name,
+            _default_cache_token(scorer_kwargs),
+        )
+        for scorer_name, (
+            scorer_func,
+            scorer_friendly_name,
+            scorer_kwargs,
+        ) in sorted(scorers.items(), key=lambda item: repr(item[0]))
+    )
+
+
+def _default_scorers_fingerprint() -> Tuple:
+    return (
+        _scorer_dict_fingerprint(DEFAULT_LABEL_SCORERS),
+        _scorer_dict_fingerprint(DEFAULT_PROBABILITY_SCORERS),
+    )
 
 
 @dataclass(eq=False, frozen=True)
@@ -210,32 +271,15 @@ class ModelGlobalPerformance:
     def fold_order(self) -> List[int]:
         return sorted(self.per_fold_outputs.keys())
 
-    # Intentionally uncached: each call recomputes. Fold concatenations / global
-    # snapshot arrays are already cached via cached_property, but per-fold metric
-    # calculation (fold_output.scores(...), a plain method) plus the aggregation
-    # arithmetic here are repeated every call. We could memoize across calls, but
-    # NOT with functools.cache on a method: it keys on self and lives for the life
-    # of the process, pinning every instance in memory (leak), and needs the dict
-    # args (label_scorers/probability_scorers) made hashable. If a hot loop ever
-    # re-calls this on the same instance with identical args, add a per-instance
-    # memoizer (dies with the instance) instead.
-    def aggregated_per_fold_scores(
+    def _compute_raw_metrics_per_fold(
         self,
-        with_abstention=True,
-        exclude_metrics_that_dont_factor_in_abstentions=False,
+        *,
+        with_abstention: bool,
+        exclude_metrics_that_dont_factor_in_abstentions: bool,
         label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
         probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
-        formatted: bool = True,
-    ) -> Dict[str, str]:
-        """return dict mapping friendly-metric-name to per-fold aggregate.
-
-        When ``formatted`` is True (default), values are ``"mean +/- std (in N folds)"``
-        strings for human display. When False, values are the raw mean across folds as
-        a float — useful for programmatic downstream use where the caller wants to do
-        its own formatting or comparison. NaN-folds are dropped from the mean (matching
-        the formatted variant's count semantics).
-        """
-        raw_metrics_per_fold: Dict[int, Dict[str, Metric]] = {
+    ) -> Dict[int, Dict[str, Metric]]:
+        return {
             fold_id: fold_output.scores(
                 with_abstention=with_abstention,
                 exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
@@ -245,6 +289,71 @@ class ModelGlobalPerformance:
             )
             for fold_id, fold_output in self.per_fold_outputs.items()
         }
+
+    def _raw_metrics_per_fold(
+        self,
+        *,
+        with_abstention: bool,
+        exclude_metrics_that_dont_factor_in_abstentions: bool,
+        label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+    ) -> Dict[int, Dict[str, Metric]]:
+        """Return per-fold metrics, memoizing only the default scorer path."""
+        # Custom scorer dictionaries may contain mutable kwargs, closures, or
+        # stateful callables. Keep those calls fully dynamic and only cache the
+        # built-in default path used by repeated reporting methods.
+        if label_scorers is not None or probability_scorers is not None:
+            return self._compute_raw_metrics_per_fold(
+                with_abstention=with_abstention,
+                exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
+                label_scorers=label_scorers,
+                probability_scorers=probability_scorers,
+            )
+
+        cache_key = (
+            with_abstention,
+            exclude_metrics_that_dont_factor_in_abstentions,
+            _default_scorers_fingerprint(),
+        )
+        # This object is a shallow-frozen snapshot, but cached_property already
+        # uses __dict__ for internal memoization. Store this cache on the
+        # instance too, so it dies with the summary and does not globally pin
+        # large ModelGlobalPerformance objects.
+        cache = self.__dict__.setdefault("_default_raw_metrics_per_fold_cache", {})
+        if cache_key not in cache:
+            cache[cache_key] = self._compute_raw_metrics_per_fold(
+                with_abstention=with_abstention,
+                exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
+                label_scorers=None,
+                probability_scorers=None,
+            )
+        return cache[cache_key]
+
+    # The raw default per-fold scorer results are cached per instance. The public
+    # aggregation method remains uncached because formatting is cheap and custom
+    # scorer dictionaries/callables should stay fully dynamic.
+    def aggregated_per_fold_scores(
+        self,
+        with_abstention=True,
+        exclude_metrics_that_dont_factor_in_abstentions=False,
+        label_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        probability_scorers: Optional[Dict[str, Tuple[Callable, str, dict]]] = None,
+        formatted: bool = True,
+    ) -> Dict[str, Union[str, float]]:
+        """return dict mapping friendly-metric-name to per-fold aggregate.
+
+        When ``formatted`` is True (default), values are ``"mean +/- std (in N folds)"``
+        strings for human display. When False, values are the raw mean across folds as
+        a float — useful for programmatic downstream use where the caller wants to do
+        its own formatting or comparison. NaN-folds are dropped from the mean (matching
+        the formatted variant's count semantics).
+        """
+        raw_metrics_per_fold = self._raw_metrics_per_fold(
+            with_abstention=with_abstention,
+            exclude_metrics_that_dont_factor_in_abstentions=exclude_metrics_that_dont_factor_in_abstentions,
+            label_scorers=label_scorers,
+            probability_scorers=probability_scorers,
+        )
 
         # Put everything in a pandas df,
         # aggregate by (metric_keyname, metric_friendlyname),

@@ -161,6 +161,150 @@ def test_aggregated_per_fold_scores_supports_distinct_scorer_arguments():
     assert second_scores["Accuracy"] == 1.0
 
 
+def test_default_per_fold_scores_cached_across_formatting_modes():
+    calls = []
+    fold = crosseval.ModelSingleFoldPerformance(
+        model_name="model",
+        fold_id=0,
+        y_true=np.array(["a", "b"]),
+        y_pred=np.array(["a", "b"]),
+        class_names=np.array(["a", "b"]),
+        fold_label_train="train",
+        fold_label_test="test",
+    )
+
+    def scores(**kwargs):
+        calls.append(kwargs.copy())
+        return {"accuracy": crosseval.Metric(0.5, "Accuracy")}
+
+    fold.scores = scores
+    perf = crosseval.ModelGlobalPerformance(
+        model_name="model",
+        per_fold_outputs={0: fold},
+        abstain_label="Unknown",
+    )
+
+    assert perf.aggregated_per_fold_scores()["Accuracy"] == (
+        "0.500 +/- 0.000 (in 1 folds)"
+    )
+    assert perf.aggregated_per_fold_scores(formatted=False)["Accuracy"] == 0.5
+    assert len(calls) == 1
+
+
+def test_default_per_fold_score_cache_detects_default_scorer_mutations(monkeypatch):
+    calls = []
+    fold = crosseval.ModelSingleFoldPerformance(
+        model_name="model",
+        fold_id=0,
+        y_true=np.array(["a", "b"]),
+        y_pred=np.array(["a", "b"]),
+        class_names=np.array(["a", "b"]),
+        fold_label_train="train",
+        fold_label_test="test",
+    )
+
+    def scores(**kwargs):
+        calls.append(kwargs.copy())
+        return {"accuracy": crosseval.Metric(float(len(calls)), "Accuracy")}
+
+    fold.scores = scores
+    perf = crosseval.ModelGlobalPerformance(
+        model_name="model",
+        per_fold_outputs={0: fold},
+        abstain_label="Unknown",
+    )
+
+    assert perf.aggregated_per_fold_scores(formatted=False)["Accuracy"] == 1.0
+
+    monkeypatch.setitem(
+        crosseval.DEFAULT_LABEL_SCORERS,
+        "cache_probe",
+        (lambda y_true, y_pred, sample_weight=None: 1.0, "Cache probe", {}),
+    )
+
+    assert perf.aggregated_per_fold_scores(formatted=False)["Accuracy"] == 2.0
+    assert len(calls) == 2
+
+
+def test_custom_per_fold_scorers_bypass_default_score_cache():
+    calls = []
+    fold = crosseval.ModelSingleFoldPerformance(
+        model_name="model",
+        fold_id=0,
+        y_true=np.array(["a", "b"]),
+        y_pred=np.array(["a", "b"]),
+        class_names=np.array(["a", "b"]),
+        fold_label_train="train",
+        fold_label_test="test",
+    )
+
+    def scores(**kwargs):
+        calls.append(kwargs.copy())
+        return {"accuracy": crosseval.Metric(float(len(calls)), "Accuracy")}
+
+    fold.scores = scores
+    perf = crosseval.ModelGlobalPerformance(
+        model_name="model",
+        per_fold_outputs={0: fold},
+        abstain_label="Unknown",
+    )
+
+    first_scores = perf.aggregated_per_fold_scores(
+        label_scorers={},
+        probability_scorers={},
+        formatted=False,
+    )
+    second_scores = perf.aggregated_per_fold_scores(
+        label_scorers={},
+        probability_scorers={},
+        formatted=False,
+    )
+
+    assert first_scores["Accuracy"] == 1.0
+    assert second_scores["Accuracy"] == 2.0
+    assert len(calls) == 2
+
+
+def test_default_per_fold_score_cache_keeps_abstention_modes_separate():
+    calls = []
+    fold = crosseval.ModelSingleFoldPerformance(
+        model_name="model",
+        fold_id=0,
+        y_true=np.array(["a", "b"]),
+        y_pred=np.array(["a", "b"]),
+        class_names=np.array(["a", "b"]),
+        fold_label_train="train",
+        fold_label_test="test",
+    )
+
+    def scores(**kwargs):
+        calls.append(kwargs.copy())
+        return {"accuracy": crosseval.Metric(0.5, "Accuracy")}
+
+    fold.scores = scores
+    perf = crosseval.ModelGlobalPerformance(
+        model_name="model",
+        per_fold_outputs={0: fold},
+        abstain_label="Unknown",
+    )
+
+    perf.aggregated_per_fold_scores(with_abstention=False)
+    perf.aggregated_per_fold_scores(with_abstention=True)
+    perf.aggregated_per_fold_scores(with_abstention=True)
+    perf.aggregated_per_fold_scores(
+        with_abstention=True,
+        exclude_metrics_that_dont_factor_in_abstentions=True,
+    )
+
+    assert [
+        (
+            call["with_abstention"],
+            call["exclude_metrics_that_dont_factor_in_abstentions"],
+        )
+        for call in calls
+    ] == [(False, False), (True, False), (True, True)]
+
+
 def test_model_global_performance_is_shallow_frozen_snapshot():
     fold = crosseval.ModelSingleFoldPerformance(
         model_name="model",

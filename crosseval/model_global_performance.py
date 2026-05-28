@@ -872,9 +872,12 @@ class ModelGlobalPerformance:
         )
         return "\n\n".join(pieces)
 
-    # Intentionally uncached: same tradeoff as aggregated_per_fold_scores above.
-    # functools.cache would pin instances in memory and require hashable dict args;
-    # prefer a per-instance memoizer if a hot loop ever needs caching here.
+    # Intentionally uncached: this is a single compute_classification_scores call
+    # over already-cached concatenated CV arrays, so there is little to memoize.
+    # If a hot loop ever makes it worth caching, follow _raw_metrics_per_fold:
+    # cache only the default-scorer path, key by with_abstention and the default
+    # scorer fingerprint, and keep custom scorer dictionaries dynamic.
+    # Avoid functools.cache; it pins instances in memory and needs hashable args.
     def global_scores(
         self,
         with_abstention=True,

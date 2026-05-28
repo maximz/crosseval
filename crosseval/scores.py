@@ -11,12 +11,20 @@ logger = logging.getLogger(__name__)
 
 def coerce_incomparable_label_arrays(*arrays):
     """Cast label arrays to strings only when mixed Python types cannot be sorted."""
-    non_null_arrays = [array for array in arrays if array is not None]
+    non_null_arrays = [np.asarray(array) for array in arrays if array is not None]
     if len(non_null_arrays) == 0:
         return arrays
-    labels = np.concatenate(
-        [np.asarray(array, dtype=object).ravel() for array in non_null_arrays]
-    )
+
+    # Fast path: skip the expensive concatenate+unique probe when the labels are
+    # guaranteed internally sortable. Homogeneous numeric arrays intermix fine, and
+    # a single shared non-object dtype kind (e.g. all strings) is always sortable.
+    # Unsortable cases only arise from object dtype or mixing kinds (e.g. numbers
+    # with strings), which fall through to the probe below.
+    kinds = {array.dtype.kind for array in non_null_arrays}
+    if "O" not in kinds and (kinds <= set("biufc") or len(kinds) == 1):
+        return arrays
+
+    labels = np.concatenate([array.astype(object).ravel() for array in non_null_arrays])
     try:
         np.unique(labels)
     except TypeError:
